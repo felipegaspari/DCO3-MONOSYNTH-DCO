@@ -6,15 +6,11 @@
 //#include "tusb_config.h"
 
 #include "pico/stdlib.h"
-// #include "hardware/pio.h"
 #include "hardware/clocks.h"
 #include "pico-dco.pio.h"
 #include "hardware/pwm.h"
-// #include "hardware/spi.h"
 
 #include "LittleFS.h"
-//#include <SingleFileDrive.h>
-// #include <EEPROM.h>
 
 #include "params_def.h"
 #include "param_router.h"

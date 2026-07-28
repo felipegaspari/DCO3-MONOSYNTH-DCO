@@ -77,8 +77,6 @@
 #include "PID.h"
 #include "autotune.h"
 
-// #include "irq_tuner.h"
-
 #ifdef RUNNING_AVERAGE
 RunningAverage ra_loop1_ADSR_and_detune(2000);
 RunningAverage ra_loop0_LFOs(2000);
@@ -205,7 +203,6 @@ void loop1() {
       VOICE_NOTES[0] = manual_DCO_calibration_start_note;
       ampCompCalibrationVal = initManualAmpCompCalibrationValPreset + manualCalibrationOffset[manualCalibrationStage];
       voice_task_autotune(0, ampCompCalibrationVal);
-      //DCO_calibration_debug(); // disabled because of manual calibration bug on osc 0 offset. needs fix
       Serial.println((String) "PW value: " + (PW[0] / 4));
 
     } else {
@@ -235,9 +232,6 @@ void loop1() {
     //  loop1_start_time = micros();
     // Serial.println("pre voice task");
     voice_task();
-    //voice_task_gold_reference();
-    //voice_task_simple();
-    //voice_task_debug();
     // Serial.println("post voice task");
     // loop speed
     // loop1_total_time = micros() - loop1_start_time;
