@@ -18,12 +18,7 @@ static constexpr uint16_t LFO_DRIFT_CC_HALF = LFO_DRIFT_CC / 2;
 lfo LFO1_class(LFO1_CC + 1);
 lfo LFO2_class(LFO2_CC);
 
-lfo LFO_DRIFT_CLASS[8] = {
-  lfo(LFO_DRIFT_CC),
-  lfo(LFO_DRIFT_CC),
-  lfo(LFO_DRIFT_CC),
-  lfo(LFO_DRIFT_CC),
-  lfo(LFO_DRIFT_CC),
+lfo LFO_DRIFT_CLASS[NUM_OSCILLATORS] = {
   lfo(LFO_DRIFT_CC),
   lfo(LFO_DRIFT_CC),
   lfo(LFO_DRIFT_CC)
@@ -32,9 +27,9 @@ lfo LFO_DRIFT_CLASS[8] = {
 
 /////////////////////////////////////////////////////////////////
 byte LFO_DRIFT_WAVEFORM = 2;
-float LFO_DRIFT_SPEED_OFFSET[8];
+float LFO_DRIFT_SPEED_OFFSET[NUM_OSCILLATORS];
 float LFO_DRIFT_SPEED = 0.6;
-volatile int16_t LFO_DRIFT_LEVEL[8];
+volatile int16_t LFO_DRIFT_LEVEL[NUM_OSCILLATORS];
 
 
 int16_t LFO1Level;
@@ -54,6 +49,7 @@ uint16_t LFO2toDETUNE1;
 // LFO2->detune depth as float plus a Q24 fixed-point version for OSC2 modulation.
 float LFO2toDETUNE2 = 0.0f;
 int32_t LFO2toDETUNE2_q24 = 0;
+int32_t LFO2toDETUNE3_q24 = 0;
 volatile uint16_t LFO2toOSC2DETUNE;
 volatile uint16_t LFO2toPW;
 

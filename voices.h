@@ -22,18 +22,18 @@ enum PortamentoMode : uint8_t {
 };
 uint8_t portamento_mode = PORTA_MODE_SLEW;
 
-// Portamento state in Q24 (Hz * 2^24)
-int64_t portamento_start_q24[NUM_VOICES_TOTAL * 2];
-int64_t portamento_stop_q24[NUM_VOICES_TOTAL * 2];
-int64_t portamento_cur_freq_q24[NUM_VOICES_TOTAL * 2];
+// Portamento state in Q24 (Hz * 2^24) — one slot per oscillator
+int64_t portamento_start_q24[NUM_OSCILLATORS];
+int64_t portamento_stop_q24[NUM_OSCILLATORS];
+int64_t portamento_cur_freq_q24[NUM_OSCILLATORS];
 // per-microsecond step in Q24
-int64_t freqPortaStep_q24[NUM_VOICES_TOTAL * 2];
+int64_t freqPortaStep_q24[NUM_OSCILLATORS];
 
 // Portamento state in note-space (Q16 semitones) for slew-rate mode
-int32_t porta_note_start_q16[NUM_VOICES_TOTAL * 2];
-int32_t porta_note_stop_q16[NUM_VOICES_TOTAL * 2];
-int32_t porta_note_cur_q16[NUM_VOICES_TOTAL * 2];
-int32_t porta_note_step_q16[NUM_VOICES_TOTAL * 2];
+int32_t porta_note_start_q16[NUM_OSCILLATORS];
+int32_t porta_note_stop_q16[NUM_OSCILLATORS];
+int32_t porta_note_cur_q16[NUM_OSCILLATORS];
+int32_t porta_note_step_q16[NUM_OSCILLATORS];
 uint8_t highestNote = 124;
 
 bool sqr1Status;
@@ -57,7 +57,7 @@ int32_t slopeQ8[multiplierTableSize - 1];
 int32_t slopeQ12[multiplierTableSize - 1];
 #endif
 // Per-DCO segment cache for interpolation (stores last 'low' index)
-int16_t interpSegCache[NUM_VOICES_TOTAL * 2];
+int16_t interpSegCache[NUM_OSCILLATORS];
 
 static const uint16_t maxFrequency = 4000;
 

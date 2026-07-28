@@ -110,7 +110,7 @@ void setup() {
   digitalWrite(24, HIGH);
 
   USBDevice.setManufacturerDescriptor("FELA         ");
-  USBDevice.setProductDescriptor("DCO-4        ");
+  USBDevice.setProductDescriptor("DCO3-MONO   ");
 
   pinMode(DCO_calibration_pin, INPUT_PULLUP);
 
@@ -203,7 +203,7 @@ void loop1() {
   if (calibrationFlag == true) {
     if (manualCalibrationFlag == true) {
       VOICE_NOTES[0] = manual_DCO_calibration_start_note;
-      ampCompCalibrationVal = initManualAmpCompCalibrationValPreset + manualCalibrationOffset[manualCalibrationStage / 2];
+      ampCompCalibrationVal = initManualAmpCompCalibrationValPreset + manualCalibrationOffset[manualCalibrationStage];
       voice_task_autotune(0, ampCompCalibrationVal);
       //DCO_calibration_debug(); // disabled because of manual calibration bug on osc 0 offset. needs fix
       Serial.println((String) "PW value: " + (PW[0] / 4));

@@ -24,7 +24,7 @@ float ADSRMaxLevel = ADSR_1_CC;
 
 uint16_t ADSRMinLevel = 0;
 
-int8_t ADSR3ToOscSelect = 2;
+int8_t ADSR3ToOscSelect = 2;  // 0=OSC1, 1=OSC2, 2=OSC1+OSC2, 3=OSC3, 4=all
 
 uint16_t ADSR1_attack = 0;
 uint16_t ADSR1_decay;
@@ -51,9 +51,6 @@ float ADSR1toPWM_formula;
 int32_t ADSR1toPWM_formula_q24;
 
 adsr adsr1_voice_0(ADSR_1_CC, ADSR1_curve1, ADSR1_curve2, false,7,7,7);
-adsr adsr1_voice_1(ADSR_1_CC, ADSR1_curve1, ADSR1_curve2, false,7,7,7);
-adsr adsr1_voice_2(ADSR_1_CC, ADSR1_curve1, ADSR1_curve2, false,7,7,7);
-adsr adsr1_voice_3(ADSR_1_CC, ADSR1_curve1, ADSR1_curve2, false,7,7,7);
 
 //bool OSCPhaseLock = false;
 
@@ -63,11 +60,6 @@ adsr adsr1_voice;
 
 ADSRStruct ADSRVoices[] = {
 {adsr1_voice_0},
-{adsr1_voice_1},
-{adsr1_voice_2},
-{adsr1_voice_3},
-// {adsr1_voice_4},
-// {adsr1_voice_5},
 };
 
 #endif

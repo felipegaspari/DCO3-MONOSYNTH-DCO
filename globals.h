@@ -6,17 +6,21 @@
 
 
 
-#define NUM_VOICES_TOTAL 4
-#define NUM_OSCILLATORS NUM_VOICES_TOTAL * 2
+#define NUM_VOICES_TOTAL 1
+#define NUM_OSCILLATORS 3
+
+// Unused: amplitude stays on RANGE PWM (not PIO). Kept only if SM1 is reused later.
+static constexpr uint8_t AMP_TO_SM[NUM_OSCILLATORS] = { 1, 1, 1 };
 
 #define MIDI_CHANNEL 1
 //#define USE_ADC_STACK_VOICES // gpio 28 (adc 2)
 //#define USE_ADC_DETUNE       // gpio 27 (adc 1)
 
-#define SCK 2
-#define MOSI 3
-#define MISO 4
-#define CS 5
+// Unused SPI (kept commented — MOSI collided with PW_PINS[0]=3).
+// #define SCK 2
+// #define MOSI 3
+// #define MISO 4
+// #define CS 5
 
 #define ENABLE_FS_CALIBRATION
 
@@ -51,7 +55,7 @@ uint32_t loop1_micros;
 uint32_t loop0_microsLast;
 uint32_t loop1_microsLast;
 
-volatile uint8_t NUM_VOICES = NUM_VOICES_TOTAL;
+volatile uint8_t NUM_VOICES = 1;
 volatile uint8_t STACK_VOICES = 1;
 
 volatile uint8_t voiceMode = 1;
@@ -74,8 +78,9 @@ float DETUNE2 = 1.00f;
 // This value represents the additive log-frequency modifier produced by LFO1.
 int32_t DETUNE_INTERNAL_q24 = 0;
 
-// LFO2 detune modulation for OSC2 only, in Q24 fixed-point.
+// LFO2 detune modulation for OSC2 / OSC3, in Q24 fixed-point.
 volatile int32_t DETUNE_INTERNAL2_q24 = 0;
+volatile int32_t DETUNE_INTERNAL3_q24 = 0;
 
 // Raw 32-bit container used to transfer DETUNE_INTERNAL_q24 between cores via FIFO.
 uint32_t DETUNE_INTERNAL_FIFO = 1;
@@ -87,57 +92,47 @@ int32_t DETUNE_INTERNAL_FIFO_q24 = (1 << 24);
 float BASE_NOTE = 440.0f;
 
 
-// WEACT RP2040:
-static constexpr uint8_t RESET_PINS[NUM_VOICES_TOTAL * 2] = { 29, 27, 19, 18, 15, 13, 12, 8 };
-static constexpr uint8_t RANGE_PINS[NUM_VOICES_TOTAL * 2] = { 28, 22, 17, 16, 14, 11, 9, 7 };
+// WEACT RP2040 (legacy 8-osc map — kept for reference):
+// static constexpr uint8_t RESET_PINS[8] = { 29, 27, 19, 18, 15, 13, 12, 8 };
+// static constexpr uint8_t RANGE_PINS[8] = { 28, 22, 17, 16, 14, 11, 9, 7 };
 
-// Raspberry Pi Pico:
-// static constexpr uint8_t RESET_PINS[NUM_VOICES_TOTAL * 2] = { 28, 26, 19, 18, 15, 13, 12, 8 };
-// static constexpr uint8_t RANGE_PINS[NUM_VOICES_TOTAL * 2] = { 27, 22, 17, 16, 14, 11,  9,  7 };
+// Raspberry Pi Pico (legacy):
+// static constexpr uint8_t RESET_PINS[8] = { 28, 26, 19, 18, 15, 13, 12, 8 };
+// static constexpr uint8_t RANGE_PINS[8] = { 27, 22, 17, 16, 14, 11,  9,  7 };
 
-// Raspberry Pi Pico 2: // ADD THIS
+// Pico 2 provisional pinout: OSC1–3 taken from the legacy WEACT DCO4 map
+// (first three oscillators). Replace when the monosynth PCB pinout is final.
+// GPIO 24 is board fix-rail (see DCO.ino), not a DCO output.
+static constexpr uint8_t RESET_PINS[NUM_OSCILLATORS] = { 29, 27, 19 };
+static constexpr uint8_t RANGE_PINS[NUM_OSCILLATORS] = { 28, 22, 17 };
 
-static constexpr uint8_t VOICE_TO_PIO[NUM_VOICES_TOTAL * 2] = { 0, 0, 0, 0, 1, 1, 1, 1 };
-static constexpr uint8_t VOICE_TO_SM[NUM_VOICES_TOTAL * 2] = { 0, 1, 2, 3, 0, 1, 2, 3 };
+// Freq SMs: pio0 SM0 = OSC1, pio1 SM0 = OSC2, pio2 SM0 = OSC3.
+static constexpr uint8_t VOICE_TO_PIO[NUM_OSCILLATORS] = { 0, 1, 2 };
+static constexpr uint8_t VOICE_TO_SM[NUM_OSCILLATORS] = { 0, 0, 0 };
 
-static constexpr uint8_t PW_PINS[NUM_VOICES_TOTAL] = { 3, 2, 4, 5 };
+static constexpr uint8_t PW_PINS[NUM_VOICES_TOTAL] = { 3 };
 
 static constexpr int DCO_calibration_pin = 10;
 
-// constexpr uint8_t RESET_PINS[NUM_VOICES_TOTAL * 2] = { 29, 27, 19, 17, /*15, 13, 10, 8*/ };
-// constexpr uint8_t RANGE_PINS[NUM_VOICES_TOTAL * 2] = { 28, 22, 18, 16/*, 14, 11, 9, 7*/ };
-// constexpr uint8_t VOICE_TO_PIO[NUM_VOICES_TOTAL * 2] = { 1, 1, 1, 1/*, 0, 0, 0, 0*/ };
-// constexpr uint8_t VOICE_TO_SM[NUM_VOICES_TOTAL * 2] = { 0, 1, 2, 3/*, 0, 1, 2, 3*/ };
-
-// constexpr uint8_t RESET_PINS[NUM_VOICES_TOTAL * 2] = { /*29, 27, 19, 17, */15, 13, 10, 8 };
-// constexpr uint8_t RANGE_PINS[NUM_VOICES_TOTAL * 2] = { /*28, 22, 18, 16,*/ 14, 11, 9, 7 };
-// constexpr uint8_t VOICE_TO_PIO[NUM_VOICES_TOTAL * 2] = { /*1, 1, 1, 1,*/ 0, 0, 0, 0 };
-// constexpr uint8_t VOICE_TO_SM[NUM_VOICES_TOTAL * 2] = { /*0, 1, 2, 3,*/ 0, 1, 2, 3 };
-
-// constexpr uint8_t RESET_PINS[NUM_VOICES_TOTAL * 2] = { 29, 27, 19, 17, /* 15, 13,*/ 10, 8 };
-// constexpr uint8_t RANGE_PINS[NUM_VOICES_TOTAL * 2] = { 28, 22, 18, 16, /* 14, 11,*/ 9, 7 };
-// constexpr uint8_t VOICE_TO_PIO[NUM_VOICES_TOTAL * 2] = { 1, 1, 1, 1, 0, 0 /*, 0, 0 */ };
-// constexpr uint8_t VOICE_TO_SM[NUM_VOICES_TOTAL * 2] = { 0, 1, 2, 3, 0, 1 /*, 2, 3 */ };
-
-uint8_t RANGE_PWM_SLICES[NUM_VOICES_TOTAL * 2];
-uint8_t VCO_PWM_SLICES[NUM_VOICES_TOTAL * 2];
+uint8_t RANGE_PWM_SLICES[NUM_OSCILLATORS];
+uint8_t VCO_PWM_SLICES[NUM_OSCILLATORS];
 uint8_t PW_PWM_SLICES[NUM_VOICES_TOTAL];
 
-uint16_t PW_CENTER[NUM_VOICES_TOTAL] = { 570, 552, 540, 553 };
-uint16_t PW_LOW_LIMIT[NUM_VOICES_TOTAL] = {0,0,0,0};
-uint16_t PW_HIGH_LIMIT[NUM_VOICES_TOTAL] = { DIV_COUNTER_PW, DIV_COUNTER_PW, DIV_COUNTER_PW, DIV_COUNTER_PW };
+uint16_t PW_CENTER[NUM_VOICES_TOTAL] = { 570 };
+uint16_t PW_LOW_LIMIT[NUM_VOICES_TOTAL] = { 0 };
+uint16_t PW_HIGH_LIMIT[NUM_VOICES_TOTAL] = { DIV_COUNTER_PW };
 uint16_t PW_LOOKUP[3] = { 0, (DIV_COUNTER_PW / 2) - 1, DIV_COUNTER_PW - 1 };
 uint16_t PW_PWM[NUM_VOICES_TOTAL];
 
 volatile uint32_t VOICES[NUM_VOICES_TOTAL];
 volatile uint8_t VOICES_LAST[NUM_VOICES_TOTAL];
-volatile uint8_t VOICES_LAST_SEQUENCE[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+volatile uint8_t VOICES_LAST_SEQUENCE[NUM_VOICES_TOTAL] = { 0 };
 volatile uint8_t VOICE_NOTES[NUM_VOICES_TOTAL];
 volatile uint8_t NEXT_VOICE = 0;
 
 uint32_t LED_BLINK_START = 0;
 
-PIO pio[2] = { pio0, pio1 };
+PIO pio[3] = { pio0, pio1, pio2 };
 
 uint8_t midi_serial_status = 0;
 int midi_pitch_bend = 8192, last_midi_pitch_bend = 8192;
@@ -165,22 +160,24 @@ void voice_task();
 void adc_task();
 
 
-uint32_t offset[2];
+uint32_t offset[3];
 uint8_t dataArray[4];
 
 float LFOMultiplier = 1;
-float voiceFreq[8];
+float voiceFreq[NUM_OSCILLATORS];
 uint16_t dato_serial;
 float dato_serial_float;
 uint8_t OSC1_interval = 24;
 uint8_t OSC2_serial_detune = 127;
 uint8_t OSC2_interval = 36;
+uint8_t OSC3_interval = 36;
 float OSC2_detune = 127;
 uint16_t OSC2DetuneVal = 256;
+uint16_t OSC3DetuneVal = 256;
 
 bool PWMPotsControlManual;
 
-uint16_t PW[4];
+uint16_t PW[NUM_VOICES_TOTAL];
 
 void serial_STM32_task();
 void serial_send_voice_freq();
@@ -188,7 +185,7 @@ void serial_send_note_on(uint8_t voice_n, uint8_t note_velo);
 void serial_send_note_off(uint8_t voice_n);
 float get_chan_level(float freq_to_amp_comp);
 
-volatile uint8_t note_on_flag[NUM_VOICES_TOTAL * 2];
+volatile uint8_t note_on_flag[NUM_VOICES_TOTAL];
 
 bool ledstat = false;
 

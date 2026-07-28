@@ -44,7 +44,7 @@ void init_DCO_calibration() {
     pwm_set_chan_level(RANGE_PWM_SLICES[i], pwm_gpio_to_channel(RANGE_PINS[i]), 0);
   }
 
-  for (int i = 0; i < NUM_VOICES_TOTAL; i += 2) {
+  for (int i = 0; i < NUM_VOICES_TOTAL; i++) {
     PW[i] = DIV_COUNTER_PW / 2;
     pwm_set_chan_level(PW_PWM_SLICES[i], pwm_gpio_to_channel(PW_PINS[i]), PW[i]);
   }
@@ -91,10 +91,15 @@ void DCO_calibration() {
     pwm_set_chan_level(RANGE_PWM_SLICES[i], pwm_gpio_to_channel(RANGE_PINS[i]), 0);
   }
 
-  for (int i = 0; i < NUM_VOICES_TOTAL; i += 2) {
+  for (int i = 0; i < NUM_VOICES_TOTAL; i++) {
     PW[i] = DIV_COUNTER_PW / 2;
     pwm_set_chan_level(PW_PWM_SLICES[i], pwm_gpio_to_channel(PW_PINS[i]), PW[i]);
   }
+
+  // PW is per-voice (not per-osc): calibrate once before amp-comp loop.
+  currentDCO = 0;
+  find_PW_center(0);
+  pwm_set_chan_level(PW_PWM_SLICES[0], pwm_gpio_to_channel(PW_PINS[0]), PW_CENTER[0]);
 
   for (int i = 0; i < NUM_OSCILLATORS; i++) {
     currentDCO = i;
@@ -104,41 +109,21 @@ void DCO_calibration() {
     ampCompCalibrationVal = initManualAmpCompCalibrationVal[currentDCO] + manualCalibrationOffset[currentDCO];
     pwm_set_chan_level(RANGE_PWM_SLICES[i], pwm_gpio_to_channel(RANGE_PINS[i]), ampCompCalibrationVal);
 
-    if ((currentDCO % 2) == 0) {
-      if (firstTuneFlag == true) {
-        find_PW_center(0);
-        pwm_set_chan_level(PW_PWM_SLICES[currentDCO / 2], pwm_gpio_to_channel(PW_PINS[currentDCO / 2]), PW_CENTER[currentDCO / 2]);
-
-      } else {
-        find_PW_center(0);  // Should be on. off for testing!!!!!!
-        //find_PW_low_limit();
-      }
-    } else {
-      DCO_calibration_current_note = DCO_calibration_start_note;
-      VOICE_NOTES[0] = DCO_calibration_current_note;
-    }
+    DCO_calibration_current_note = DCO_calibration_start_note;
+    VOICE_NOTES[0] = DCO_calibration_current_note;
 
     // uint16_t lowestFrequency = find_lowest_freq();
     // calibrationData[0] = lowestFrequency;
 
-    bool oscAmpCompCalibrationComplete = false;
-
     calibrate_DCO();
 
-    for (int i = 0; i < chanLevelVoiceDataSize; i++) {
-      Serial.println(calibrationData[i]);
+    for (int j = 0; j < chanLevelVoiceDataSize; j++) {
+      Serial.println(calibrationData[j]);
     }
 
     update_FS_voice(currentDCO);
 
     Serial.println((String) "DCO " + currentDCO + (String) " calibration finished.");
-
-    // if ((currentDCO % 2) == 0) {
-    //   //Falta agregar que use los nuevos datos antes de encontrar el centro
-    //   find_PW_center(1);
-    //   //find_PW_high_limit();
-    //   //find_PW_low_limit();
-    // }
 
     restart_DCO_calibration();
   }
@@ -231,13 +216,13 @@ void find_PW_center(uint8_t mode) {
   ampCompCalibrationVal = initManualAmpCompCalibrationVal[currentDCO] + manualCalibrationOffset[currentDCO];
 
   if (firstTuneFlag == true) {
-    PW[currentDCO / 2] = DIV_COUNTER_PW / 2;
+    PW[0] = DIV_COUNTER_PW / 2;
     PWCalibrationVal = DIV_COUNTER_PW / 2;
-    PW_CENTER[currentDCO / 2] = DIV_COUNTER_PW / 2;
+    PW_CENTER[0] = DIV_COUNTER_PW / 2;
   } else {
 
-    PW[currentDCO / 2] = PW_CENTER[currentDCO / 2];
-    PWCalibrationVal = PW_CENTER[currentDCO / 2];
+    PW[0] = PW_CENTER[0];
+    PWCalibrationVal = PW_CENTER[0];
   }
 
   voice_task_autotune(voiceTaskMode, ampCompCalibrationVal);
@@ -255,7 +240,7 @@ void find_PW_center(uint8_t mode) {
 
   while (bestGap > targetGap) {
 
-    pwm_set_chan_level(PW_PWM_SLICES[currentDCO / 2], pwm_gpio_to_channel(PW_PINS[currentDCO / 2]), PWCalibrationVal);
+    pwm_set_chan_level(PW_PWM_SLICES[0], pwm_gpio_to_channel(PW_PINS[0]), PWCalibrationVal);
 
     delay(30);
 
@@ -338,8 +323,8 @@ void find_PW_center(uint8_t mode) {
     }
   }
   Serial.println("PW center found !!!");
-  update_FS_PWCenter(currentDCO / 2, bestCandidate);  //bestCandidate;
-  PW_CENTER[currentDCO / 2] = bestCandidate;
+  update_FS_PWCenter(0, bestCandidate);  // PW is per-voice
+  PW_CENTER[0] = bestCandidate;
 }
 
 /////////////////////////////////
@@ -361,14 +346,14 @@ void find_PW_low_limit() {
 
   sampleTime = (1000000 / sNotePitches[DCO_calibration_current_note - 12]) * ((samplesNumber - 1) / 2);
 
-  PW[currentDCO / 2] = PW_CENTER[currentDCO / 2] / 2;
-  PWCalibrationVal = PW[currentDCO / 2];
+  PW[0] = PW_CENTER[0] / 2;
+  PWCalibrationVal = PW[0];
 
   PIDOutputLowerLimit = 0;
   PIDOutputHigherLimit = DIV_COUNTER_PW;
 
-  PWCalibrationVal = PW[currentDCO / 2];
-  pwm_set_chan_level(PW_PWM_SLICES[currentDCO / 2], pwm_gpio_to_channel(PW_PINS[currentDCO / 2]), PW[currentDCO / 2]);
+  PWCalibrationVal = PW[0];
+  pwm_set_chan_level(PW_PWM_SLICES[0], pwm_gpio_to_channel(PW_PINS[0]), PW[0]);
 
   voice_task_autotune(3, 0);
 
@@ -387,7 +372,7 @@ void find_PW_low_limit() {
 
   while (abs(targetGap - DCO_calibration_difference)) {
 
-    pwm_set_chan_level(PW_PWM_SLICES[currentDCO / 2], pwm_gpio_to_channel(PW_PINS[currentDCO / 2]), PWCalibrationVal);
+    pwm_set_chan_level(PW_PWM_SLICES[0], pwm_gpio_to_channel(PW_PINS[0]), PWCalibrationVal);
 
     delay(30);
 
@@ -454,8 +439,8 @@ void find_PW_low_limit() {
       Serial.println((String) "PWCalibrationVal: " + PWCalibrationVal);
     }
   }
-  update_FS_PW_Low_Limit(currentDCO / 2, PWCalibrationVal);  //bestCandidate?;
-  PW_LOW_LIMIT[currentDCO / 2] = PWCalibrationVal;
+  update_FS_PW_Low_Limit(0, PWCalibrationVal);  // PW is per-voice
+  PW_LOW_LIMIT[0] = PWCalibrationVal;
 }
 
 float find_gap(byte specialMode) {
@@ -707,7 +692,7 @@ void VCO_calibration() {
     pwm_set_chan_level(RANGE_PWM_SLICES[i], pwm_gpio_to_channel(RANGE_PINS[i]), 0);
   }
 
-  for (int i = 0; i < NUM_VOICES_TOTAL; i += 2) {
+  for (int i = 0; i < NUM_VOICES_TOTAL; i++) {
     PW[i] = DIV_COUNTER_PW / 2;
     pwm_set_chan_level(PW_PWM_SLICES[i], pwm_gpio_to_channel(PW_PINS[i]), PW[i]);
   }
@@ -720,41 +705,21 @@ void VCO_calibration() {
     ampCompCalibrationVal = initManualAmpCompCalibrationVal[currentDCO] + manualCalibrationOffset[currentDCO];
     pwm_set_chan_level(RANGE_PWM_SLICES[i], pwm_gpio_to_channel(RANGE_PINS[i]), ampCompCalibrationVal);
 
-    // if ((currentDCO % 2) == 0) {
-    //   if (firstTuneFlag == true) {
-    //     find_PW_center(0);
-    //     pwm_set_chan_level(PW_PWM_SLICES[currentDCO / 2], pwm_gpio_to_channel(PW_PINS[currentDCO / 2]), PW_CENTER[currentDCO / 2]);
-
-    //   } else {
-    //     find_PW_center(0);  // Should be on. off for testing!!!!!!
-    //     //find_PW_low_limit();
-    //   }
-    // } else {
-      DCO_calibration_current_note = DCO_calibration_start_note;
-      VOICE_NOTES[0] = DCO_calibration_current_note;
-    // }
+    DCO_calibration_current_note = DCO_calibration_start_note;
+    VOICE_NOTES[0] = DCO_calibration_current_note;
 
     // uint16_t lowestFrequency = find_lowest_freq();
     // calibrationData[0] = lowestFrequency;
 
-    bool oscAmpCompCalibrationComplete = false;
-
     calibrate_DCO();
 
-    for (int i = 0; i < chanLevelVoiceDataSize; i++) {
-      Serial.println(calibrationData[i]);
+    for (int j = 0; j < chanLevelVoiceDataSize; j++) {
+      Serial.println(calibrationData[j]);
     }
 
     update_FS_voice(currentDCO);
 
     Serial.println((String) "DCO " + currentDCO + (String) " calibration finished.");
-
-    // if ((currentDCO % 2) == 0) {
-    //   //Falta agregar que use los nuevos datos antes de encontrar el centro
-    //   find_PW_center(1);
-    //   //find_PW_high_limit();
-    //   //find_PW_low_limit();
-    // }
 
     restart_DCO_calibration();
   }

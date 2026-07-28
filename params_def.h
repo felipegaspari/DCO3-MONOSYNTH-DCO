@@ -66,6 +66,11 @@ enum ParamId : uint16_t {
   // 32: DCO-only portamento mode selector (currently local to DCO)
   PARAM_PORTAMENTO_MODE          = 32,
 
+  // DCO3 monosynth OSC3 (new IDs — wire on Mainboard/Input/Screen later)
+  PARAM_OSC3_INTERVAL            = 33,
+  PARAM_OSC3_DETUNE_VAL          = 34,
+  PARAM_LFO2_TO_DETUNE3          = 35,
+
   // --- LFO routing (shared) -------------------------------------------
   PARAM_LFO1_TO_DCO              = 40,
   PARAM_LFO1_SPEED               = 41,

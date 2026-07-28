@@ -129,29 +129,40 @@ inline void voice_task() {
       if (note2 > highestNote) {
         note2 -= ((uint8_t(note2 - highestNote) / 12) * 12);
       }
+      uint8_t note3 = note1 - 36 + OSC3_interval;
+      if (note3 > highestNote) {
+        note3 -= ((uint8_t(note3 - highestNote) / 12) * 12);
+      }
       // Clamp note indexes to table (defensive)
       const size_t NOTE_TABLE_LEN = sizeof(sNotePitches_q24) / sizeof(sNotePitches_q24[0]);
       if (note1 >= NOTE_TABLE_LEN) note1 = (uint8_t)(NOTE_TABLE_LEN - 1);
       if (note2 >= NOTE_TABLE_LEN) note2 = (uint8_t)(NOTE_TABLE_LEN - 1);
+      if (note3 >= NOTE_TABLE_LEN) note3 = (uint8_t)(NOTE_TABLE_LEN - 1);
 
 #ifdef RUNNING_AVERAGE
       unsigned long t_osc2 = micros();
 #endif
-      // Optimized: Calculate OSC2 detune in Q24 and keep it there.
+      // Optimized: Calculate OSC2/OSC3 detune in Q24 and keep it there.
       // The float conversion has been removed as it is no longer needed.
       // detune = 1.0 + 0.0002 * (256 - val)
       static constexpr int32_t DETUNE_SCALE_Q24 = (int32_t)(0.0002f * (float)(1 << 24) + 0.5f);
       int32_t detune_steps = ((int)256 - OSC2DetuneVal);
       int32_t detune_q24 = (1 << 24) + (detune_steps * DETUNE_SCALE_Q24);
+      int32_t detune3_steps = ((int)256 - OSC3DetuneVal);
+      int32_t detune3_q24 = (1 << 24) + (detune3_steps * DETUNE_SCALE_Q24);
 #ifdef RUNNING_AVERAGE
       ra_osc2_detune.addValue((float)(micros() - t_osc2));
 #endif
 
       int64_t freq_q24_A;
       int64_t freq_q24_B;
+      int64_t freq_q24_C;
 
-      uint8_t DCO_A = i * 2;
-      uint8_t DCO_B = (i * 2) + 1;
+      // Fixed osc indices for current mono hardware (3 oscs on voice 0).
+      // Future paraphonic mode can remap osc ownership per voice without gutting allocation.
+      const uint8_t DCO_A = 0;
+      const uint8_t DCO_B = 1;
+      const uint8_t DCO_C = 2;
 
       // Serial.println("VOICE TASK 2");
       ////***********************    PORTAMENTO CODE   ****************************************/////
@@ -171,8 +182,10 @@ inline void voice_task() {
           // Derive endpoints for portamento
           int64_t stopA_q24 = sNotePitches_q24[note1];
           int64_t stopB_q24 = sNotePitches_q24[note2];
+          int64_t stopC_q24 = sNotePitches_q24[note3];
           portamento_stop_q24[DCO_A] = stopA_q24;
           portamento_stop_q24[DCO_B] = stopB_q24;
+          portamento_stop_q24[DCO_C] = stopC_q24;
 
           int32_t T = (portaTime == 0) ? 1 : (int32_t)portaTime;
 
@@ -180,46 +193,60 @@ inline void voice_task() {
             // Time-based mode: glide linearly in frequency.
             int64_t startA_q24 = portamento_cur_freq_q24[DCO_A];
             int64_t startB_q24 = portamento_cur_freq_q24[DCO_B];
+            int64_t startC_q24 = portamento_cur_freq_q24[DCO_C];
             portamento_start_q24[DCO_A] = startA_q24;
             portamento_start_q24[DCO_B] = startB_q24;
+            portamento_start_q24[DCO_C] = startC_q24;
             portamento_cur_freq_q24[DCO_A] = startA_q24;
             portamento_cur_freq_q24[DCO_B] = startB_q24;
+            portamento_cur_freq_q24[DCO_C] = startC_q24;
 
             int64_t dA = stopA_q24 - startA_q24;
             int64_t dB = stopB_q24 - startB_q24;
+            int64_t dC = stopC_q24 - startC_q24;
 
             // Fixed-time glide: span is covered in approximately portaTime microseconds.
             int64_t halfT = (int64_t)T >> 1;
             int64_t numA = (dA >= 0) ? (dA + halfT) : (dA - halfT);
             int64_t numB = (dB >= 0) ? (dB + halfT) : (dB - halfT);
+            int64_t numC = (dC >= 0) ? (dC + halfT) : (dC - halfT);
             freqPortaStep_q24[DCO_A] = (numA / (int64_t)T);
             freqPortaStep_q24[DCO_B] = (numB / (int64_t)T);
+            freqPortaStep_q24[DCO_C] = (numC / (int64_t)T);
           } else {
             // Slew-rate (musical) mode: glide linearly in note-space (semitones).
             // Use current note position as start; if uninitialized, fall back to target note.
             int32_t startNoteA_q16 = porta_note_cur_q16[DCO_A];
             int32_t startNoteB_q16 = porta_note_cur_q16[DCO_B];
+            int32_t startNoteC_q16 = porta_note_cur_q16[DCO_C];
             int32_t targetNoteA_q16 = ((int32_t)note1) << 16;
             int32_t targetNoteB_q16 = ((int32_t)note2) << 16;
+            int32_t targetNoteC_q16 = ((int32_t)note3) << 16;
 
             if (startNoteA_q16 == 0) startNoteA_q16 = targetNoteA_q16;
             if (startNoteB_q16 == 0) startNoteB_q16 = targetNoteB_q16;
+            if (startNoteC_q16 == 0) startNoteC_q16 = targetNoteC_q16;
 
             porta_note_start_q16[DCO_A] = startNoteA_q16;
             porta_note_start_q16[DCO_B] = startNoteB_q16;
+            porta_note_start_q16[DCO_C] = startNoteC_q16;
             porta_note_stop_q16[DCO_A] = targetNoteA_q16;
             porta_note_stop_q16[DCO_B] = targetNoteB_q16;
+            porta_note_stop_q16[DCO_C] = targetNoteC_q16;
 
             int32_t dNoteA_q16 = porta_note_stop_q16[DCO_A] - porta_note_start_q16[DCO_A];
             int32_t dNoteB_q16 = porta_note_stop_q16[DCO_B] - porta_note_start_q16[DCO_B];
+            int32_t dNoteC_q16 = porta_note_stop_q16[DCO_C] - porta_note_start_q16[DCO_C];
 
             // Per-microsecond step in Q16 notes.
             // Use symmetric rounding for step magnitude.
             int64_t halfT = (int64_t)T >> 1;
             int64_t numA = (dNoteA_q16 >= 0) ? ((int64_t)dNoteA_q16 + halfT) : ((int64_t)dNoteA_q16 - halfT);
             int64_t numB = (dNoteB_q16 >= 0) ? ((int64_t)dNoteB_q16 + halfT) : ((int64_t)dNoteB_q16 - halfT);
+            int64_t numC = (dNoteC_q16 >= 0) ? ((int64_t)dNoteC_q16 + halfT) : ((int64_t)dNoteC_q16 - halfT);
             porta_note_step_q16[DCO_A] = (int32_t)(numA / (int64_t)T);
             porta_note_step_q16[DCO_B] = (int32_t)(numB / (int64_t)T);
+            porta_note_step_q16[DCO_C] = (int32_t)(numC / (int64_t)T);
 
             // Ensure we always move for non-zero intervals; otherwise tiny intervals
             // with long times could quantize to zero step and "stick".
@@ -229,12 +256,17 @@ inline void voice_task() {
             if (dNoteB_q16 != 0 && porta_note_step_q16[DCO_B] == 0) {
               porta_note_step_q16[DCO_B] = (dNoteB_q16 > 0) ? 1 : -1;
             }
+            if (dNoteC_q16 != 0 && porta_note_step_q16[DCO_C] == 0) {
+              porta_note_step_q16[DCO_C] = (dNoteC_q16 > 0) ? 1 : -1;
+            }
 
             // Initialize current note and frequency at start of glide
             porta_note_cur_q16[DCO_A] = startNoteA_q16;
             porta_note_cur_q16[DCO_B] = startNoteB_q16;
+            porta_note_cur_q16[DCO_C] = startNoteC_q16;
             portamento_cur_freq_q24[DCO_A] = noteQ16_to_freqQ24(startNoteA_q16);
             portamento_cur_freq_q24[DCO_B] = noteQ16_to_freqQ24(startNoteB_q16);
+            portamento_cur_freq_q24[DCO_C] = noteQ16_to_freqQ24(startNoteC_q16);
           }
         }
 
@@ -242,24 +274,29 @@ inline void voice_task() {
         int32_t elapsed_us = (int32_t)portamentoTimer[i];
         int64_t curA;
         int64_t curB;
+        int64_t curC;
 
         if (portaMode == PORTA_MODE_TIME) {
           if ((uint32_t)elapsed_us > portaTime) {
             // Snap to target once we have exceeded the (current) portamento time
             curA = portamento_stop_q24[DCO_A];
             curB = portamento_stop_q24[DCO_B];
+            curC = portamento_stop_q24[DCO_C];
           } else {
             // Absolute-time base in Q24
             curA = portamento_start_q24[DCO_A] + freqPortaStep_q24[DCO_A] * (int64_t)elapsed_us;
             curB = portamento_start_q24[DCO_B] + freqPortaStep_q24[DCO_B] * (int64_t)elapsed_us;
+            curC = portamento_start_q24[DCO_C] + freqPortaStep_q24[DCO_C] * (int64_t)elapsed_us;
           }
         } else {
           // Slew-rate (musical) mode: step is constant in note-space; stop when we reach the target.
           int32_t dNoteA_q16 = porta_note_stop_q16[DCO_A] - porta_note_start_q16[DCO_A];
           int32_t dNoteB_q16 = porta_note_stop_q16[DCO_B] - porta_note_start_q16[DCO_B];
+          int32_t dNoteC_q16 = porta_note_stop_q16[DCO_C] - porta_note_start_q16[DCO_C];
 
           int64_t curNoteA_q16 = (int64_t)porta_note_start_q16[DCO_A] + (int64_t)porta_note_step_q16[DCO_A] * (int64_t)elapsed_us;
           int64_t curNoteB_q16 = (int64_t)porta_note_start_q16[DCO_B] + (int64_t)porta_note_step_q16[DCO_B] * (int64_t)elapsed_us;
+          int64_t curNoteC_q16 = (int64_t)porta_note_start_q16[DCO_C] + (int64_t)porta_note_step_q16[DCO_C] * (int64_t)elapsed_us;
 
           // Clamp when passing the target
           if ((dNoteA_q16 >= 0 && curNoteA_q16 >= (int64_t)porta_note_stop_q16[DCO_A]) ||
@@ -270,16 +307,23 @@ inline void voice_task() {
               (dNoteB_q16 < 0 && curNoteB_q16 <= (int64_t)porta_note_stop_q16[DCO_B])) {
             curNoteB_q16 = porta_note_stop_q16[DCO_B];
           }
+          if ((dNoteC_q16 >= 0 && curNoteC_q16 >= (int64_t)porta_note_stop_q16[DCO_C]) ||
+              (dNoteC_q16 < 0 && curNoteC_q16 <= (int64_t)porta_note_stop_q16[DCO_C])) {
+            curNoteC_q16 = porta_note_stop_q16[DCO_C];
+          }
 
           porta_note_cur_q16[DCO_A] = (int32_t)curNoteA_q16;
           porta_note_cur_q16[DCO_B] = (int32_t)curNoteB_q16;
+          porta_note_cur_q16[DCO_C] = (int32_t)curNoteC_q16;
 
           curA = noteQ16_to_freqQ24(porta_note_cur_q16[DCO_A]);
           curB = noteQ16_to_freqQ24(porta_note_cur_q16[DCO_B]);
+          curC = noteQ16_to_freqQ24(porta_note_cur_q16[DCO_C]);
         }
 
         portamento_cur_freq_q24[DCO_A] = curA;
         portamento_cur_freq_q24[DCO_B] = curB;
+        portamento_cur_freq_q24[DCO_C] = curC;
 
         // If the portamento time or mode control changed while gliding, retime the glide
         // from the *current* position so there is no pitch jump, only a change
@@ -294,45 +338,61 @@ inline void voice_task() {
             // Recompute time-based glide from current frequency.
             int64_t targetA = sNotePitches_q24[note1];
             int64_t targetB = sNotePitches_q24[note2];
+            int64_t targetC = sNotePitches_q24[note3];
 
             portamento_start_q24[DCO_A] = curA;
             portamento_start_q24[DCO_B] = curB;
+            portamento_start_q24[DCO_C] = curC;
             portamento_stop_q24[DCO_A] = targetA;
             portamento_stop_q24[DCO_B] = targetB;
+            portamento_stop_q24[DCO_C] = targetC;
 
             int64_t dA = targetA - curA;
             int64_t dB = targetB - curB;
+            int64_t dC = targetC - curC;
             int64_t halfT = (int64_t)T >> 1;
             int64_t numA = (dA >= 0) ? (dA + halfT) : (dA - halfT);
             int64_t numB = (dB >= 0) ? (dB + halfT) : (dB - halfT);
+            int64_t numC = (dC >= 0) ? (dC + halfT) : (dC - halfT);
             freqPortaStep_q24[DCO_A] = (numA / (int64_t)T);
             freqPortaStep_q24[DCO_B] = (numB / (int64_t)T);
+            freqPortaStep_q24[DCO_C] = (numC / (int64_t)T);
           } else {
             // Recompute slew-rate glide from current note position.
             int32_t currentNoteA_q16 = porta_note_cur_q16[DCO_A];
             int32_t currentNoteB_q16 = porta_note_cur_q16[DCO_B];
+            int32_t currentNoteC_q16 = porta_note_cur_q16[DCO_C];
             int32_t targetNoteA_q16 = ((int32_t)note1) << 16;
             int32_t targetNoteB_q16 = ((int32_t)note2) << 16;
+            int32_t targetNoteC_q16 = ((int32_t)note3) << 16;
 
             porta_note_start_q16[DCO_A] = currentNoteA_q16;
             porta_note_start_q16[DCO_B] = currentNoteB_q16;
+            porta_note_start_q16[DCO_C] = currentNoteC_q16;
             porta_note_stop_q16[DCO_A] = targetNoteA_q16;
             porta_note_stop_q16[DCO_B] = targetNoteB_q16;
+            porta_note_stop_q16[DCO_C] = targetNoteC_q16;
 
             int32_t dNoteA_q16 = porta_note_stop_q16[DCO_A] - porta_note_start_q16[DCO_A];
             int32_t dNoteB_q16 = porta_note_stop_q16[DCO_B] - porta_note_start_q16[DCO_B];
+            int32_t dNoteC_q16 = porta_note_stop_q16[DCO_C] - porta_note_start_q16[DCO_C];
 
             int64_t halfT = (int64_t)T >> 1;
             int64_t numA = (dNoteA_q16 >= 0) ? ((int64_t)dNoteA_q16 + halfT) : ((int64_t)dNoteA_q16 - halfT);
             int64_t numB = (dNoteB_q16 >= 0) ? ((int64_t)dNoteB_q16 + halfT) : ((int64_t)dNoteB_q16 - halfT);
+            int64_t numC = (dNoteC_q16 >= 0) ? ((int64_t)dNoteC_q16 + halfT) : ((int64_t)dNoteC_q16 - halfT);
             porta_note_step_q16[DCO_A] = (int32_t)(numA / (int64_t)T);
             porta_note_step_q16[DCO_B] = (int32_t)(numB / (int64_t)T);
+            porta_note_step_q16[DCO_C] = (int32_t)(numC / (int64_t)T);
 
             if (dNoteA_q16 != 0 && porta_note_step_q16[DCO_A] == 0) {
               porta_note_step_q16[DCO_A] = (dNoteA_q16 > 0) ? 1 : -1;
             }
             if (dNoteB_q16 != 0 && porta_note_step_q16[DCO_B] == 0) {
               porta_note_step_q16[DCO_B] = (dNoteB_q16 > 0) ? 1 : -1;
+            }
+            if (dNoteC_q16 != 0 && porta_note_step_q16[DCO_C] == 0) {
+              porta_note_step_q16[DCO_C] = (dNoteC_q16 > 0) ? 1 : -1;
             }
           }
         }
@@ -344,6 +404,10 @@ inline void voice_task() {
         portamento_cur_freq_q24[DCO_B] = sNotePitches_q24[note2];
         portamento_start_q24[DCO_B] = portamento_cur_freq_q24[DCO_B];
         portamento_stop_q24[DCO_B] = portamento_cur_freq_q24[DCO_B];
+
+        portamento_cur_freq_q24[DCO_C] = sNotePitches_q24[note3];
+        portamento_start_q24[DCO_C] = portamento_cur_freq_q24[DCO_C];
+        portamento_stop_q24[DCO_C] = portamento_cur_freq_q24[DCO_C];
       }
 
 #if DCO_DEBUG_REPORT
@@ -364,8 +428,11 @@ inline void voice_task() {
         // Use precomputed Q24 scale: ADSR1toDETUNE1_scale_q24 = round(ADSR1toDETUNE1 * 2^24 / 1080000)
         ADSRModifier_q24 = (int64_t)linToLogLookup[ADSR1Level[i]] * (int32_t)ADSR1toDETUNE1_scale_q24;
       }
-      int64_t ADSRModifierOSC1_q24 = (ADSR3ToOscSelect == 0 || ADSR3ToOscSelect == 2) ? ADSRModifier_q24 : 0;
-      int64_t ADSRModifierOSC2_q24 = (ADSR3ToOscSelect == 1 || ADSR3ToOscSelect == 2) ? ADSRModifier_q24 : 0;
+      // ADSR3→pitch select:
+      //   0 = OSC1, 1 = OSC2, 2 = OSC1+OSC2 (legacy), 3 = OSC3, 4 = all three
+      int64_t ADSRModifierOSC1_q24 = (ADSR3ToOscSelect == 0 || ADSR3ToOscSelect == 2 || ADSR3ToOscSelect == 4) ? ADSRModifier_q24 : 0;
+      int64_t ADSRModifierOSC2_q24 = (ADSR3ToOscSelect == 1 || ADSR3ToOscSelect == 2 || ADSR3ToOscSelect == 4) ? ADSRModifier_q24 : 0;
+      int64_t ADSRModifierOSC3_q24 = (ADSR3ToOscSelect == 3 || ADSR3ToOscSelect == 4) ? ADSRModifier_q24 : 0;
 #ifdef RUNNING_AVERAGE
       ra_adsr_modifier.addValue((float)(micros() - t_adsr));
       unsigned long t_unison = micros();
@@ -373,11 +440,16 @@ inline void voice_task() {
 
       // Fixed-point unison modifier in Q24: 0.00006 * unisonDetune * step
       static constexpr int32_t UNISON_SCALE_Q24 = (int32_t)(0.0001f * (float)(1 << 24) + 0.5f);
-      // Voice-indexed alternating pattern: +1, -1, +2, -2, +3, -3, ...
-      int32_t mag = (i >> 1) + 1;
-      int32_t sign = ((i & 0x01) == 0) ? 1 : -1;
-      int32_t unisonStep = sign * mag;
-      int64_t unisonMODIFIER_q24 = (int64_t)unisonDetune * (int64_t)UNISON_SCALE_Q24 * (int64_t)unisonStep;
+      // Per-osc spread for monosynth (voice i always 0 today): OSC1=0, OSC2=+1, OSC3=-1.
+      // When NUM_VOICES_TOTAL > 1, also apply classic voice-indexed alternating pattern.
+      int32_t voiceMag = (i >> 1) + 1;
+      int32_t voiceSign = ((i & 0x01) == 0) ? 1 : -1;
+      int32_t voiceUnisonStep = voiceSign * voiceMag;
+      static constexpr int32_t OSC_UNISON_STEP[3] = { 0, 1, -1 };
+      int64_t unisonMODIFIER_q24 = (int64_t)unisonDetune * (int64_t)UNISON_SCALE_Q24 * (int64_t)voiceUnisonStep;
+      int64_t unisonMODIFIER_OSC1_q24 = unisonMODIFIER_q24 + (int64_t)unisonDetune * (int64_t)UNISON_SCALE_Q24 * (int64_t)OSC_UNISON_STEP[0];
+      int64_t unisonMODIFIER_OSC2_q24 = unisonMODIFIER_q24 + (int64_t)unisonDetune * (int64_t)UNISON_SCALE_Q24 * (int64_t)OSC_UNISON_STEP[1];
+      int64_t unisonMODIFIER_OSC3_q24 = unisonMODIFIER_q24 + (int64_t)unisonDetune * (int64_t)UNISON_SCALE_Q24 * (int64_t)OSC_UNISON_STEP[2];
 #ifdef RUNNING_AVERAGE
       ra_unison_modifier.addValue((float)(micros() - t_unison));
       unsigned long t_drift = micros();
@@ -388,6 +460,7 @@ inline void voice_task() {
       int32_t driftScale_q24 = (int32_t)((int32_t)analogDrift * DRIFT_UNIT_Q24);
       int64_t DETUNE_DRIFT_OSC1_q24 = (analogDrift != 0) ? ((int64_t)LFO_DRIFT_LEVEL[DCO_A] * (int64_t)driftScale_q24) : 0;
       int64_t DETUNE_DRIFT_OSC2_q24 = (analogDrift != 0) ? ((int64_t)LFO_DRIFT_LEVEL[DCO_B] * (int64_t)driftScale_q24) : 0;
+      int64_t DETUNE_DRIFT_OSC3_q24 = (analogDrift != 0) ? ((int64_t)LFO_DRIFT_LEVEL[DCO_C] * (int64_t)driftScale_q24) : 0;
 #ifdef RUNNING_AVERAGE
       ra_drift_multiplier.addValue((float)(micros() - t_drift));
 #endif
@@ -401,10 +474,12 @@ inline void voice_task() {
       // 1.00001f in Q24 (epsilon ≈ 168 LSBs)
       // Fixed-point equivalent of:
       //   modifiersAll = DETUNE_INTERNAL_FIFO_float + unisonMODIFIER + calcPitchbend + 1.00001f;
-      int64_t modifiersAll_q24 =
-        (int64_t)detune_fifo_q24 + unisonMODIFIER_q24 + (int64_t)calcPitchbend_q24 + (int64_t)Q24_ONE_EPS;
-      int64_t freqModifiers_q24 = ADSRModifierOSC1_q24 + DETUNE_DRIFT_OSC1_q24 + modifiersAll_q24;
-      int64_t freq2Modifiers_q24 = ADSRModifierOSC2_q24 + DETUNE_DRIFT_OSC2_q24 + modifiersAll_q24 + (int64_t)DETUNE_INTERNAL2_q24;
+      // Unison is applied per-osc below; shared part is LFO1 FIFO + pitchbend + epsilon.
+      int64_t modifiersBase_q24 =
+        (int64_t)detune_fifo_q24 + (int64_t)calcPitchbend_q24 + (int64_t)Q24_ONE_EPS;
+      int64_t freqModifiers_q24 = ADSRModifierOSC1_q24 + DETUNE_DRIFT_OSC1_q24 + modifiersBase_q24 + unisonMODIFIER_OSC1_q24;
+      int64_t freq2Modifiers_q24 = ADSRModifierOSC2_q24 + DETUNE_DRIFT_OSC2_q24 + modifiersBase_q24 + unisonMODIFIER_OSC2_q24 + (int64_t)DETUNE_INTERNAL2_q24;
+      int64_t freq3Modifiers_q24 = ADSRModifierOSC3_q24 + DETUNE_DRIFT_OSC3_q24 + modifiersBase_q24 + unisonMODIFIER_OSC3_q24 + (int64_t)DETUNE_INTERNAL3_q24;
 #ifdef RUNNING_AVERAGE
       ra_modifiers_combination.addValue((float)(micros() - t_modifiers));
       unsigned long t_freq_scaling_x = micros();
@@ -415,12 +490,15 @@ inline void voice_task() {
       // Fast fixed-point equivalent of:
       //   freq  *= interpolatePitchMultiplier(freqModifiers)/multiplierTableScale;
       //   freq2 *= OSC2_detune * interpolatePitchMultiplier(freq2Modifiers)/multiplierTableScale;
+      //   freq3 *= OSC3_detune * interpolatePitchMultiplier(freq3Modifiers)/multiplierTableScale;
       // High-resolution fixed-point x with truncation toward zero (matches original float cast):
       // xQ16 = trunc((q24 * scale) / 2^8) to carry 16 fractional bits of table-units
       int64_t x1_q24s = (freqModifiers_q24 * (int64_t)multiplierTableScale);   // Q24 * int -> Q24
       int64_t x2_q24s = (freq2Modifiers_q24 * (int64_t)multiplierTableScale);  // Q24 * int -> Q24
+      int64_t x3_q24s = (freq3Modifiers_q24 * (int64_t)multiplierTableScale);
       int32_t xScaled1_Q16 = (x1_q24s >= 0) ? (int32_t)(x1_q24s >> 8) : (int32_t)(-((-x1_q24s) >> 8));
       int32_t xScaled2_Q16 = (x2_q24s >= 0) ? (int32_t)(x2_q24s >> 8) : (int32_t)(-((-x2_q24s) >> 8));
+      int32_t xScaled3_Q16 = (x3_q24s >= 0) ? (int32_t)(x3_q24s >> 8) : (int32_t)(-((-x3_q24s) >> 8));
 
 #ifdef RUNNING_AVERAGE
       ra_freq_scaling_x.addValue((float)(micros() - t_freq_scaling_x));
@@ -430,6 +508,7 @@ inline void voice_task() {
 #if PITCH_USE_RATIO_Q16
       int32_t ratio1_Q16 = interpolateRatioQ16_cached(xScaled1_Q16, DCO_A);
       int32_t ratio2_Q16 = interpolateRatioQ16_cached(xScaled2_Q16, DCO_B);
+      int32_t ratio3_Q16 = interpolateRatioQ16_cached(xScaled3_Q16, DCO_C);
 #ifdef RUNNING_AVERAGE
       ra_freq_scaling_ratio.addValue((float)(micros() - t_freq_scaling_ratio));
       unsigned long t_freq_scaling_post = micros();
@@ -442,6 +521,10 @@ inline void voice_task() {
       // combined_Q16 = round((ratio2_Q16 * detune_Q16) / 2^16)
       int32_t combined_Q16 = (int32_t)((((int64_t)ratio2_Q16 * (int64_t)detune_Q16) + (1LL << 15)) >> 16);
       freq_q24_B = (portamento_cur_freq_q24[DCO_B] * (int64_t)combined_Q16) >> 16;
+      // Combine OSC3 ratio with detune into one Q16 factor
+      int32_t detune3_Q16 = (int32_t)((((int64_t)detune3_q24) + 128) >> 8);
+      int32_t combined3_Q16 = (int32_t)((((int64_t)ratio3_Q16 * (int64_t)detune3_Q16) + (1LL << 15)) >> 16);
+      freq_q24_C = (portamento_cur_freq_q24[DCO_C] * (int64_t)combined3_Q16) >> 16;
 #else
 #ifdef RUNNING_AVERAGE
       ra_freq_scaling_ratio.addValue((float)(micros() - t_freq_scaling_ratio));
@@ -450,17 +533,24 @@ inline void voice_task() {
 
       int32_t yTab1 = interpolatePitchMultiplierIntQ16_cached(xScaled1_Q16, DCO_A);
       int32_t yTab2 = interpolatePitchMultiplierIntQ16_cached(xScaled2_Q16, DCO_B);
+      int32_t yTab3 = interpolatePitchMultiplierIntQ16_cached(xScaled3_Q16, DCO_C);
       // Convert yTab -> ratioQ16 using reciprocal-multiply (round((yTab<<16)/10000))
       uint64_t numA = ((uint64_t)(uint32_t)yTab1 << 16) + 5000u;
       int32_t ratio1_Q16_fallback = (int32_t)((numA * 0xD1B71759ULL) >> 45);
       uint64_t numB = ((uint64_t)(uint32_t)yTab2 << 16) + 5000u;
       int32_t ratio2_Q16_fallback = (int32_t)((numB * 0xD1B71759ULL) >> 45);
+      uint64_t numC = ((uint64_t)(uint32_t)yTab3 << 16) + 5000u;
+      int32_t ratio3_Q16_fallback = (int32_t)((numC * 0xD1B71759ULL) >> 45);
       // Scale A with ratioQ16
       freq_q24_A = (portamento_cur_freq_q24[DCO_A] * (int64_t)ratio1_Q16_fallback) >> 16;
       // Combine OSC2 ratio with detune into one Q16 factor
       int32_t detune_Q16_fb = (int32_t)((((int64_t)detune_q24) + 128) >> 8);
       int32_t combined_Q16_fb = (int32_t)((((int64_t)ratio2_Q16_fallback * (int64_t)detune_Q16_fb) + (1LL << 15)) >> 16);
       freq_q24_B = (portamento_cur_freq_q24[DCO_B] * (int64_t)combined_Q16_fb) >> 16;
+      // Combine OSC3 ratio with detune into one Q16 factor
+      int32_t detune3_Q16_fb = (int32_t)((((int64_t)detune3_q24) + 128) >> 8);
+      int32_t combined3_Q16_fb = (int32_t)((((int64_t)ratio3_Q16_fallback * (int64_t)detune3_Q16_fb) + (1LL << 15)) >> 16);
+      freq_q24_C = (portamento_cur_freq_q24[DCO_C] * (int64_t)combined3_Q16_fb) >> 16;
 #endif
 
 #if DCO_DEBUG_REPORT
@@ -478,15 +568,20 @@ inline void voice_task() {
       // freq_q24_X is Hz * 2^24, so shifting right by 20 yields Hz * 2^4.
       uint32_t freqA_Q4 = (uint32_t)((freq_q24_A + (1LL << 19)) >> 20);  // round to nearest
       uint32_t freqB_Q4 = (uint32_t)((freq_q24_B + (1LL << 19)) >> 20);  // round to nearest
+      uint32_t freqC_Q4 = (uint32_t)((freq_q24_C + (1LL << 19)) >> 20);
       if (freqA_Q4 == 0) freqA_Q4 = 1;
       if (freqB_Q4 == 0) freqB_Q4 = 1;
+      if (freqC_Q4 == 0) freqC_Q4 = 1;
 
       uint8_t pioNumberA = VOICE_TO_PIO[DCO_A];
       uint8_t pioNumberB = VOICE_TO_PIO[DCO_B];
+      uint8_t pioNumberC = VOICE_TO_PIO[DCO_C];
       PIO pioN_A = pio[VOICE_TO_PIO[DCO_A]];
       PIO pioN_B = pio[VOICE_TO_PIO[DCO_B]];
-      uint8_t sm1N = VOICE_TO_SM[DCO_A];
-      uint8_t sm2N = VOICE_TO_SM[DCO_B];
+      PIO pioN_C = pio[VOICE_TO_PIO[DCO_C]];
+      uint8_t smAN = VOICE_TO_SM[DCO_A];
+      uint8_t smBN = VOICE_TO_SM[DCO_B];
+      uint8_t smCN = VOICE_TO_SM[DCO_C];
 
       // voice_task_3_time = micros() - voice_task_start_time;
 
@@ -494,13 +589,13 @@ inline void voice_task() {
       unsigned long t_clk_div = micros();
 #endif
 
-      register uint32_t clk_div2, clk_div1;
+      register uint32_t clk_div1, clk_div2, clk_div3;
 
       uint8_t arbitrary_measured_correction_value = 0; // 60 is a measured correction for the PIO
       
       uint32_t phaseDelay = 0;
 
-      uint32_t total_cycles1, total_cycles2;
+      uint32_t total_cycles1, total_cycles2, total_cycles3;
 
 #if HIGH_PRECISION_CLKDIV
       // High-precision path: use full Q24 frequency with 64-bit intermediate divide.
@@ -517,6 +612,13 @@ inline void voice_task() {
       } else {
         total_cycles2 = 0;
       }
+
+      if (freq_q24_C > 0) {
+        uint64_t num3 = ((uint64_t)sysClock_Hz << 24) + (uint64_t)(freq_q24_C / 2);
+        total_cycles3 = (uint32_t)(num3 / (uint64_t)freq_q24_C);
+      } else {
+        total_cycles3 = 0;
+      }
 #else
       // --- Oscillator 1: Fixed-point Calculation (no float / 64-bit divide) ---
       // freqA_Q4 represents Hz * 2^4, so multiply sysClock_Hz by 2^4 and divide.
@@ -524,6 +626,9 @@ inline void voice_task() {
 
       // --- Oscillator 2: Fixed-point Calculation (no float / 64-bit divide) ---
       total_cycles2 = (sysClock_Hz * 16u + (freqB_Q4 / 2u)) / freqB_Q4;  // rounded
+
+      // --- Oscillator 3: Fixed-point Calculation (no float / 64-bit divide) ---
+      total_cycles3 = (sysClock_Hz * 16u + (freqC_Q4 / 2u)) / freqC_Q4;
 #endif
 
       // Use rounded division when computing clk_div to minimise bias.
@@ -533,6 +638,7 @@ inline void voice_task() {
       // 1. Calculate the dynamic phase and high period on EVERY call.
       //    Use a single high-precision multiply/divide to avoid compounding
       //    rounding error from per-degree quantisation.
+      // Phase align applies to OSC2 only (OSC1↔OSC2 sync); OSC3 is free-running.
       if (oscSync > 1 && phaseAlignOSC2 != 0) {
         // phaseDelay ~= total_cycles2 * phaseAlignOSC2 / 360
         uint64_t phase_num = (uint64_t)total_cycles2 * (uint64_t)phaseAlignOSC2;
@@ -548,6 +654,9 @@ inline void voice_task() {
       uint32_t total_osr_val2 = total_cycles2 - high_total_cycles2 - T_LOW_OVERHEAD_CYCLES + arbitrary_measured_correction_value;
       clk_div2 = (total_osr_val2 + (NUM_OSR_CHUNKS / 2u)) / NUM_OSR_CHUNKS;
 
+      uint32_t total_osr_val3 = total_cycles3 - T_HIGH_TOTAL_CYCLES - T_LOW_OVERHEAD_CYCLES + arbitrary_measured_correction_value;
+      clk_div3 = (total_osr_val3 + (NUM_OSR_CHUNKS / 2u)) / NUM_OSR_CHUNKS;
+
 #ifdef RUNNING_AVERAGE
       ra_clk_div_calc.addValue((float)(micros() - t_clk_div));
 #endif
@@ -557,38 +666,51 @@ inline void voice_task() {
       unsigned long t_chan_level = micros();
 #endif
 
-      uint16_t chanLevel, chanLevel2;
+      uint16_t chanLevel, chanLevel2, chanLevel3;
 
       // Derive Q16 from Q24 for amp-comp, then to Hz*2^FREQ_FRAC_BITS (get_chan_level does not need higher precision)
       int32_t freq_q16_A = (int32_t)((freq_q24_A + (1LL << 7)) >> 8);
       int32_t freq_q16_B = (int32_t)((freq_q24_B + (1LL << 7)) >> 8);
+      int32_t freq_q16_C = (int32_t)((freq_q24_C + (1LL << 7)) >> 8);
       const int Q16_TO_FREQ_SHIFT = (16 - FREQ_FRAC_BITS);
       int32_t freqFx_A = (freq_q16_A >= 0) ? (freq_q16_A >> Q16_TO_FREQ_SHIFT)
                                            : -((-freq_q16_A) >> Q16_TO_FREQ_SHIFT);
       int32_t freqFx_B = (freq_q16_B >= 0) ? (freq_q16_B >> Q16_TO_FREQ_SHIFT)
                                            : -((-freq_q16_B) >> Q16_TO_FREQ_SHIFT);
+      int32_t freqFx_C = (freq_q16_C >= 0) ? (freq_q16_C >> Q16_TO_FREQ_SHIFT)
+                                           : -((-freq_q16_C) >> Q16_TO_FREQ_SHIFT);
       switch (syncMode) {
         case 0:
           chanLevel = get_chan_level_lookup_fast(freqFx_A, DCO_A);
           chanLevel2 = get_chan_level_lookup_fast(freqFx_B, DCO_B);
+          chanLevel3 = get_chan_level_lookup_fast(freqFx_C, DCO_C);
           break;
         case 1:
           chanLevel = get_chan_level_lookup_fast((freqFx_A > freqFx_B ? freqFx_A : freqFx_B), DCO_A);
           chanLevel2 = get_chan_level_lookup_fast(freqFx_B, DCO_B);
+          chanLevel3 = get_chan_level_lookup_fast(freqFx_C, DCO_C);
           break;
         case 2:
           chanLevel = get_chan_level_lookup_fast(freqFx_A, DCO_A);
           chanLevel2 = get_chan_level_lookup_fast((freqFx_A > freqFx_B ? freqFx_A : freqFx_B), DCO_B);
+          chanLevel3 = get_chan_level_lookup_fast(freqFx_C, DCO_C);
+          break;
+        default:
+          chanLevel = get_chan_level_lookup_fast(freqFx_A, DCO_A);
+          chanLevel2 = get_chan_level_lookup_fast(freqFx_B, DCO_B);
+          chanLevel3 = get_chan_level_lookup_fast(freqFx_C, DCO_C);
           break;
       }
 #ifdef RUNNING_AVERAGE
       ra_get_chan_level.addValue((float)(micros() - t_chan_level));
 #endif
 
-      pio_sm_put(pioN_A, sm1N, clk_div1);
-      pio_sm_put(pioN_B, sm2N, clk_div2);
-      pio_sm_exec(pioN_A, sm1N, pio_encode_pull(false, false));
-      pio_sm_exec(pioN_B, sm2N, pio_encode_pull(false, false));
+      pio_sm_put(pioN_A, smAN, clk_div1);
+      pio_sm_put(pioN_B, smBN, clk_div2);
+      pio_sm_put(pioN_C, smCN, clk_div3);
+      pio_sm_exec(pioN_A, smAN, pio_encode_pull(false, false));
+      pio_sm_exec(pioN_B, smBN, pio_encode_pull(false, false));
+      pio_sm_exec(pioN_C, smCN, pio_encode_pull(false, false));
 
       if (note_on_flag_flag[i]) {
         // --- Reverse Calculation to find the expected output frequency ---
@@ -637,41 +759,43 @@ inline void voice_task() {
 #endif
 
         if (oscSync == 1) {
-          pio_sm_exec(pioN_A, sm1N, pio_encode_jmp(10 + offset[pioNumberA]));  // OSC Sync MODE
-          pio_sm_exec(pioN_B, sm2N, pio_encode_jmp(10 + offset[pioNumberB]));
+          pio_sm_exec(pioN_A, smAN, pio_encode_jmp(10 + offset[pioNumberA]));  // OSC Sync MODE
+          pio_sm_exec(pioN_B, smBN, pio_encode_jmp(10 + offset[pioNumberB]));
         }
 
         if (oscSync > 1) {
-          const uint32_t sm_mask = (1u << sm1N) | (1u << sm2N);
+          // OSC1/OSC2 live on different PIO blocks — enable/disable each SM separately.
+          pio_sm_set_enabled(pioN_A, smAN, false);
+          pio_sm_set_enabled(pioN_B, smBN, false);
 
-          pio_set_sm_mask_enabled(pioN_A, sm_mask, false);
+          pio_sm_clear_fifos(pioN_B, smBN);
+          pio_sm_clear_fifos(pioN_A, smAN);
 
-          pio_sm_clear_fifos(pioN_B, sm2N);
-          pio_sm_clear_fifos(pioN_A, sm1N);
+          pio_sm_put(pioN_B, smBN, y_val2);
+          pio_sm_exec(pioN_B, smBN, pio_encode_pull(false, false));
+          pio_sm_exec(pioN_B, smBN, pio_encode_out(pio_y, 31));
 
-          pio_sm_put(pioN_B, sm2N, y_val2);
-          pio_sm_exec(pioN_B, sm2N, pio_encode_pull(false, false));
-          pio_sm_exec(pioN_B, sm2N, pio_encode_out(pio_y, 31));
+          pio_sm_put(pioN_A, smAN, clk_div1);
+          pio_sm_put(pioN_B, smBN, clk_div2);
+          pio_sm_exec(pioN_A, smAN, pio_encode_pull(false, true));
+          pio_sm_exec(pioN_B, smBN, pio_encode_pull(false, true));
 
-          pio_sm_put(pioN_A, sm1N, clk_div1);
-          pio_sm_put(pioN_B, sm2N, clk_div2);
-          pio_sm_exec(pioN_A, sm1N, pio_encode_pull(false, true));
-          pio_sm_exec(pioN_B, sm2N, pio_encode_pull(false, true));
+          pio_sm_exec(pioN_A, smAN, pio_encode_jmp(10 + offset[pioNumberA]));  // OSC Sync MODE
+          pio_sm_exec(pioN_B, smBN, pio_encode_jmp(10 + offset[pioNumberB]));
 
-          pio_sm_exec(pioN_A, sm1N, pio_encode_jmp(10 + offset[pioNumberA]));  // OSC Sync MODE
-          pio_sm_exec(pioN_B, sm2N, pio_encode_jmp(10 + offset[pioNumberB]));
-
-
-          pio_set_sm_mask_enabled(pioN_A, sm_mask, true);
+          pio_sm_set_enabled(pioN_A, smAN, true);
+          pio_sm_set_enabled(pioN_B, smBN, true);
         }
 
         pwm_set_chan_level(RANGE_PWM_SLICES[DCO_A], pwm_gpio_to_channel(RANGE_PINS[DCO_A]), chanLevel);
         pwm_set_chan_level(RANGE_PWM_SLICES[DCO_B], pwm_gpio_to_channel(RANGE_PINS[DCO_B]), chanLevel2);
+        pwm_set_chan_level(RANGE_PWM_SLICES[DCO_C], pwm_gpio_to_channel(RANGE_PINS[DCO_C]), chanLevel3);
       }
 
       if (timer99microsFlag) {
         pwm_set_chan_level(RANGE_PWM_SLICES[DCO_A], pwm_gpio_to_channel(RANGE_PINS[DCO_A]), chanLevel);
         pwm_set_chan_level(RANGE_PWM_SLICES[DCO_B], pwm_gpio_to_channel(RANGE_PINS[DCO_B]), chanLevel2);
+        pwm_set_chan_level(RANGE_PWM_SLICES[DCO_C], pwm_gpio_to_channel(RANGE_PINS[DCO_C]), chanLevel3);
 
         if (sqr1Status) {
 #ifdef RUNNING_AVERAGE
@@ -731,6 +855,10 @@ inline void voice_task_simple() {
       if (note2 > highestNote) {
         note2 -= ((uint8_t(note2 - highestNote) / 12) * 12);
       }
+      uint8_t note3 = note1 - 36 + OSC3_interval;
+      if (note3 > highestNote) {
+        note3 -= ((uint8_t(note3 - highestNote) / 12) * 12);
+      }
 
       if (OSC2DetuneVal == 256) {
         OSC2_detune = 1;
@@ -740,12 +868,17 @@ inline void voice_task_simple() {
 
       float freq;
       float freq2;
+      float freq3;
 
-      uint8_t DCO_A = i * 2;
-      uint8_t DCO_B = (i * 2) + 1;
+      // Fixed osc indices for current mono hardware (3 oscs on voice 0).
+      // Future paraphonic mode can remap osc ownership per voice without gutting allocation.
+      const uint8_t DCO_A = 0;
+      const uint8_t DCO_B = 1;
+      const uint8_t DCO_C = 2;
 
       freq = sNotePitches[note1];
       freq2 = sNotePitches[note2];
+      freq3 = sNotePitches[note3];
 
       // Serial.println("VOICE TASK 2");
 
@@ -759,6 +892,11 @@ inline void voice_task_simple() {
       } else if ((uint16_t)freq2 < 6) {
         freq2 = 6;
       }
+      if ((uint16_t)freq3 >= maxFrequency) {
+        freq3 = maxFrequency;
+      } else if ((uint16_t)freq3 < 6) {
+        freq3 = 6;
+      }
 
       // voice_task_2_time = micros() - voice_task_start_time;
 
@@ -766,8 +904,10 @@ inline void voice_task_simple() {
       uint8_t pioNumberB = VOICE_TO_PIO[DCO_B];
       PIO pioN_A = pio[VOICE_TO_PIO[DCO_A]];
       PIO pioN_B = pio[VOICE_TO_PIO[DCO_B]];
-      uint8_t sm1N = VOICE_TO_SM[DCO_A];
-      uint8_t sm2N = VOICE_TO_SM[DCO_B];
+      PIO pioN_C = pio[VOICE_TO_PIO[DCO_C]];
+      uint8_t smAN = VOICE_TO_SM[DCO_A];
+      uint8_t smBN = VOICE_TO_SM[DCO_B];
+      uint8_t smCN = VOICE_TO_SM[DCO_C];
 
       // voice_task_3_time = micros() - voice_task_start_time;
 
@@ -789,9 +929,13 @@ inline void voice_task_simple() {
       if (freq2 == 0)
         clk_div2 = 0;
 
+      uint32_t clk_div3 = (uint32_t)((sysClock_Hz / freq3) - pioPulseLength) / NUM_OSR_CHUNKS;
+      if (freq3 == 0)
+        clk_div3 = 0;
+
       // voice_task_4_time = micros() - voice_task_start_time;
 
-      uint16_t chanLevel, chanLevel2;
+      uint16_t chanLevel, chanLevel2, chanLevel3;
 
       switch (syncMode) {
         case 0:
@@ -806,37 +950,46 @@ inline void voice_task_simple() {
           chanLevel = get_chan_level_fast_from_float(freq, DCO_A);
           chanLevel2 = get_chan_level_fast_from_float(max(freq, freq2), DCO_B);
           break;
+        default:
+          chanLevel = get_chan_level_fast_from_float(freq, DCO_A);
+          chanLevel2 = get_chan_level_fast_from_float(freq2, DCO_B);
+          break;
       }
+      chanLevel3 = get_chan_level_fast_from_float(freq3, DCO_C);
 
       // VCO LEVEL //uint16_t vcoLevel = get_vco_level(freq);
 
-      pio_sm_put(pioN_A, sm1N, clk_div1);
-      pio_sm_put(pioN_B, sm2N, clk_div2);
-      pio_sm_exec(pioN_A, sm1N, pio_encode_pull(false, false));
-      pio_sm_exec(pioN_B, sm2N, pio_encode_pull(false, false));
+      pio_sm_put(pioN_A, smAN, clk_div1);
+      pio_sm_put(pioN_B, smBN, clk_div2);
+      pio_sm_put(pioN_C, smCN, clk_div3);
+      pio_sm_exec(pioN_A, smAN, pio_encode_pull(false, false));
+      pio_sm_exec(pioN_B, smBN, pio_encode_pull(false, false));
+      pio_sm_exec(pioN_C, smCN, pio_encode_pull(false, false));
 
       // Serial.println("VOICE TASK 5a");
 
       if (note_on_flag_flag[i]) {
         if (oscSync > 0) {
-          pio_sm_exec(pioN_A, sm1N, pio_encode_jmp(10 + offset[pioNumberA]));  // OSC Sync MODE
-          pio_sm_exec(pioN_B, sm2N, pio_encode_jmp(10 + offset[pioNumberB]));
+          pio_sm_exec(pioN_A, smAN, pio_encode_jmp(10 + offset[pioNumberA]));  // OSC Sync MODE
+          pio_sm_exec(pioN_B, smBN, pio_encode_jmp(10 + offset[pioNumberB]));
 
           if (oscSync > 1) {
-            pio_sm_put(pioN_B, sm2N, pioPulseLength + phaseDelay);
-            pio_sm_exec(pioN_B, sm2N, pio_encode_pull(false, false));
-            pio_sm_exec(pioN_B, sm2N, pio_encode_out(pio_y, 31));
-            pio_sm_exec(pioN_B, sm2N, pio_encode_out(pio_x, 31));
+            pio_sm_put(pioN_B, smBN, pioPulseLength + phaseDelay);
+            pio_sm_exec(pioN_B, smBN, pio_encode_pull(false, false));
+            pio_sm_exec(pioN_B, smBN, pio_encode_out(pio_y, 31));
+            pio_sm_exec(pioN_B, smBN, pio_encode_out(pio_x, 31));
           }
         }
 
         pwm_set_chan_level(RANGE_PWM_SLICES[DCO_A], pwm_gpio_to_channel(RANGE_PINS[DCO_A]), chanLevel);
         pwm_set_chan_level(RANGE_PWM_SLICES[DCO_B], pwm_gpio_to_channel(RANGE_PINS[DCO_B]), chanLevel2);
+        pwm_set_chan_level(RANGE_PWM_SLICES[DCO_C], pwm_gpio_to_channel(RANGE_PINS[DCO_C]), chanLevel3);
       }
 
       if (timer99microsFlag) {
         pwm_set_chan_level(RANGE_PWM_SLICES[DCO_A], pwm_gpio_to_channel(RANGE_PINS[DCO_A]), chanLevel);
         pwm_set_chan_level(RANGE_PWM_SLICES[DCO_B], pwm_gpio_to_channel(RANGE_PINS[DCO_B]), chanLevel2);
+        pwm_set_chan_level(RANGE_PWM_SLICES[DCO_C], pwm_gpio_to_channel(RANGE_PINS[DCO_C]), chanLevel3);
       }
 
       if (sqr1Status) {
@@ -938,18 +1091,23 @@ void setSyncMode() {
         sidesetPin = RESET_PINS[i];
         break;
       case 1:
-        if (i == 0 || i == 2 || i == 4 || i == 6) {
-          sidesetPin = RESET_PINS[i];
+        // OSC2 syncs from OSC1; OSC3 free-running
+        if (i == 1) {
+          sidesetPin = RESET_PINS[0];
         } else {
-          sidesetPin = RESET_PINS[i - 1];
+          sidesetPin = RESET_PINS[i];
         }
         break;
       case 2:
-        if (i == 0 || i == 2 || i == 4 || i == 6) {
-          sidesetPin = RESET_PINS[i + 1];
+        // OSC1 syncs from OSC2; OSC3 free-running
+        if (i == 0) {
+          sidesetPin = RESET_PINS[1];
         } else {
           sidesetPin = RESET_PINS[i];
         }
+        break;
+      default:
+        sidesetPin = RESET_PINS[i];
         break;
     }
 
@@ -1182,7 +1340,11 @@ void voice_task_autotune(uint8_t taskAutotuneVoiceMode, uint16_t calibrationValu
 
   if (manualCalibrationFlag == true) {  // One Ocillator at a time to get correct gap
 
-    int8_t currentCalibrationOscillator = manualCalibrationStage / 2;
+    // Stage is the oscillator index (0..NUM_OSCILLATORS-1), not a DCO4 pair index.
+    uint8_t currentCalibrationOscillator = (uint8_t)manualCalibrationStage;
+    if (currentCalibrationOscillator >= NUM_OSCILLATORS) {
+      currentCalibrationOscillator = NUM_OSCILLATORS - 1;
+    }
 
     // ALL AT ONCE
     for (int i = 0; i < NUM_OSCILLATORS; i++) {
@@ -1208,7 +1370,7 @@ void voice_task_autotune(uint8_t taskAutotuneVoiceMode, uint16_t calibrationValu
 
         pwm_set_chan_level(RANGE_PWM_SLICES[i], pwm_gpio_to_channel(RANGE_PINS[i]), calibrationValue);
 
-        pwm_set_chan_level(PW_PWM_SLICES[i / 2], pwm_gpio_to_channel(PW_PINS[i / 2]), 0);
+        pwm_set_chan_level(PW_PWM_SLICES[0], pwm_gpio_to_channel(PW_PINS[0]), 0);
 
         Serial.println((String) "currentCalibrationOscillator: " + (int)currentCalibrationOscillator + (String) "        calibrationValue: " + (int)calibrationValue);
       }
@@ -1273,22 +1435,31 @@ void voice_task_debug() {
       if (note2 > highestNote) {
         note2 -= ((uint8_t(note2 - highestNote) / 12) * 12);
       }
+      uint8_t note3 = note1 - 36 + OSC3_interval;
+      if (note3 > highestNote) {
+        note3 -= ((uint8_t(note3 - highestNote) / 12) * 12);
+      }
 
-      uint8_t DCO_A = i * 2;
-      uint8_t DCO_B = (i * 2) + 1;
+      const uint8_t DCO_A = 0;
+      const uint8_t DCO_B = 1;
+      const uint8_t DCO_C = 2;
 
       register float freq;
       register float freq2;
+      register float freq3;
 
       freq = (float)sNotePitches[note1];
       freq2 = (float)sNotePitches[note2];
+      freq3 = (float)sNotePitches[note3];
 
       uint8_t pioNumberA = VOICE_TO_PIO[DCO_A];
       uint8_t pioNumberB = VOICE_TO_PIO[DCO_B];
       PIO pioN_A = pio[VOICE_TO_PIO[DCO_A]];
       PIO pioN_B = pio[VOICE_TO_PIO[DCO_B]];
-      uint8_t sm1N = VOICE_TO_SM[DCO_A];
-      uint8_t sm2N = VOICE_TO_SM[DCO_B];
+      PIO pioN_C = pio[VOICE_TO_PIO[DCO_C]];
+      uint8_t smAN = VOICE_TO_SM[DCO_A];
+      uint8_t smBN = VOICE_TO_SM[DCO_B];
+      uint8_t smCN = VOICE_TO_SM[DCO_C];
 
       register uint32_t clk_div1 = (uint32_t)(((float)sysClock_Hz / freq) - pioPulseLength - 1) / NUM_OSR_CHUNKS;
 
@@ -1296,49 +1467,53 @@ void voice_task_debug() {
         clk_div1 = 0;
 
       register uint32_t clk_div2 = (uint32_t)(((float)sysClock_Hz / freq2) - pioPulseLength - 1) / NUM_OSR_CHUNKS;
+      register uint32_t clk_div3 = (uint32_t)(((float)sysClock_Hz / freq3) - pioPulseLength - 1) / NUM_OSR_CHUNKS;
 
-      uint16_t chanLevel = get_chan_level_lookup_float((int32_t)(freq * 100), (i * 2));
-      uint16_t chanLevel2 = get_chan_level_lookup_float((int32_t)(freq2 * 100), (i * 2) + 1);
+      uint16_t chanLevel = get_chan_level_lookup_float((int32_t)(freq * 100), DCO_A);
+      uint16_t chanLevel2 = get_chan_level_lookup_float((int32_t)(freq2 * 100), DCO_B);
+      uint16_t chanLevel3 = get_chan_level_lookup_float((int32_t)(freq3 * 100), DCO_C);
 
       if (oscSync == 0) {
 
-        pio_sm_put(pioN_A, sm1N, clk_div1);
-        pio_sm_put(pioN_B, sm2N, clk_div2);
-        pio_sm_exec(pioN_A, sm1N, pio_encode_pull(false, false));
-        pio_sm_exec(pioN_B, sm2N, pio_encode_pull(false, false));
+        pio_sm_put(pioN_A, smAN, clk_div1);
+        pio_sm_put(pioN_B, smBN, clk_div2);
+        pio_sm_put(pioN_C, smCN, clk_div3);
+        pio_sm_exec(pioN_A, smAN, pio_encode_pull(false, false));
+        pio_sm_exec(pioN_B, smBN, pio_encode_pull(false, false));
+        pio_sm_exec(pioN_C, smCN, pio_encode_pull(false, false));
       } else {
-        pio_sm_put(pioN_A, sm1N, clk_div1);
-        pio_sm_put(pioN_B, sm2N, clk_div2);
-        pio_sm_exec(pioN_A, sm1N, pio_encode_pull(false, false));
-        pio_sm_exec(pioN_B, sm2N, pio_encode_pull(false, false));
+        pio_sm_put(pioN_A, smAN, clk_div1);
+        pio_sm_put(pioN_B, smBN, clk_div2);
+        pio_sm_put(pioN_C, smCN, clk_div3);
+        pio_sm_exec(pioN_A, smAN, pio_encode_pull(false, false));
+        pio_sm_exec(pioN_B, smBN, pio_encode_pull(false, false));
+        pio_sm_exec(pioN_C, smCN, pio_encode_pull(false, false));
         if (note_on_flag_flag[i]) {
           switch (oscSync) {
             case 1:
-              pio_sm_exec(pioN_A, sm1N, pio_encode_jmp(10 + offset[pioNumberA]));  // OSC Sync MODE
-              pio_sm_exec(pioN_B, sm2N, pio_encode_jmp(10 + offset[pioNumberB]));
+              pio_sm_exec(pioN_A, smAN, pio_encode_jmp(10 + offset[pioNumberA]));  // OSC Sync MODE
+              pio_sm_exec(pioN_B, smBN, pio_encode_jmp(10 + offset[pioNumberB]));
               break;
             case 2:
-              pio_sm_exec(pioN_A, sm1N, pio_encode_jmp(4 + offset[pioNumberA]));  // OSC Half Sync MODE
-              pio_sm_exec(pioN_B, sm2N, pio_encode_jmp(12 + offset[pioNumberB]));
+              pio_sm_exec(pioN_A, smAN, pio_encode_jmp(4 + offset[pioNumberA]));  // OSC Half Sync MODE
+              pio_sm_exec(pioN_B, smBN, pio_encode_jmp(12 + offset[pioNumberB]));
               break;
             case 3:
-              pio_sm_exec(pioN_A, sm1N, pio_encode_jmp(4 + offset[pioNumberA]));  // OSC 3rd-quarter Sync MODE
-              pio_sm_exec(pioN_B, sm2N, pio_encode_jmp(10 + offset[pioNumberB]));
+              pio_sm_exec(pioN_A, smAN, pio_encode_jmp(4 + offset[pioNumberA]));  // OSC 3rd-quarter Sync MODE
+              pio_sm_exec(pioN_B, smBN, pio_encode_jmp(10 + offset[pioNumberB]));
               break;
             default:
               break;
           }
-          uint16_t chanLevel = get_chan_level_lookup_float((int32_t)(freq * 100), (i * 2));
-          uint16_t chanLevel2 = get_chan_level_lookup_float((int32_t)(freq2 * 100), (i * 2) + 1);
           pwm_set_chan_level(RANGE_PWM_SLICES[DCO_A], pwm_gpio_to_channel(RANGE_PINS[DCO_A]), chanLevel);
           pwm_set_chan_level(RANGE_PWM_SLICES[DCO_B], pwm_gpio_to_channel(RANGE_PINS[DCO_B]), chanLevel2);
+          pwm_set_chan_level(RANGE_PWM_SLICES[DCO_C], pwm_gpio_to_channel(RANGE_PINS[DCO_C]), chanLevel3);
         }
       }
       if (timer99microsFlag) {
-        uint16_t chanLevel = get_chan_level_lookup_float((int32_t)(freq * 100), (i * 2));
-        uint16_t chanLevel2 = get_chan_level_lookup_float((int32_t)(freq2 * 100), (i * 2) + 1);
         pwm_set_chan_level(RANGE_PWM_SLICES[DCO_A], pwm_gpio_to_channel(RANGE_PINS[DCO_A]), chanLevel);
         pwm_set_chan_level(RANGE_PWM_SLICES[DCO_B], pwm_gpio_to_channel(RANGE_PINS[DCO_B]), chanLevel2);
+        pwm_set_chan_level(RANGE_PWM_SLICES[DCO_C], pwm_gpio_to_channel(RANGE_PINS[DCO_C]), chanLevel3);
       }
     }
     note_on_flag_flag[i] = false;
@@ -1506,7 +1681,7 @@ void initMultiplierTables() {
 #endif
   }
   // Initialize per-DCO cache to invalid
-  for (int d = 0; d < NUM_VOICES_TOTAL * 2; ++d) interpSegCache[d] = -1;
+  for (int d = 0; d < NUM_OSCILLATORS; ++d) interpSegCache[d] = -1;
 }
 
 #ifdef RUNNING_AVERAGE
@@ -1622,6 +1797,7 @@ static void amp_comp_debug_window(int32_t x, uint8_t voiceN) {
   Serial.println();
 }
 
+#if 0  // Legacy 2-osc reference path — not maintained for DCO3 3-osc monosynth
 inline void voice_task_gold_reference() {
   for (int i = 0; i < NUM_VOICES; i++) {
     uint32_t phaseDelay;
@@ -1631,8 +1807,9 @@ inline void voice_task_gold_reference() {
       note_on_flag[i] = 0;
     }
 
-    uint8_t DCO_A = i * 2;
-    uint8_t DCO_B = (i * 2) + 1;
+    const uint8_t DCO_A = 0;
+    const uint8_t DCO_B = 1;
+    const uint8_t DCO_C = 2;
 
     // --- High Precision Frequency Calculation (compatible with voice_task_simple) ---
     uint8_t note1 = VOICE_NOTES[i] - 36 + OSC1_interval;
@@ -1746,3 +1923,4 @@ inline void voice_task_gold_reference() {
     note_on_flag_flag[i] = false;
   }
 }
+#endif  // voice_task_gold_reference

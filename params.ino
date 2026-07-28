@@ -68,13 +68,26 @@ static void apply_param_osc2_interval(int16_t v) {
   OSC2_interval = v;
 }
 
+static void apply_param_osc3_interval(int16_t v) {
+  OSC3_interval = v;
+}
+
 static void apply_param_osc2_detune_val(int16_t v) {
   OSC2DetuneVal = 512 - v;
+}
+
+static void apply_param_osc3_detune_val(int16_t v) {
+  OSC3DetuneVal = 512 - v;
 }
 
 static void apply_param_lfo2_to_detune2(int16_t v) {
   float lfo2_amt = (float)expConverterFloat((uint8_t)v, 500) / 275000.0f;
   LFO2toDETUNE2_q24 = (int32_t)(lfo2_amt * (float)(1 << 24) + 0.5f);
+}
+
+static void apply_param_lfo2_to_detune3(int16_t v) {
+  float lfo2_amt = (float)expConverterFloat((uint8_t)v, 500) / 275000.0f;
+  LFO2toDETUNE3_q24 = (int32_t)(lfo2_amt * (float)(1 << 24) + 0.5f);
 }
 
 static void apply_param_osc_sync_mode(int16_t v) {
@@ -258,14 +271,16 @@ static void apply_param_manual_calibration_flag(int16_t v) {
 }
 
 static void apply_param_manual_calibration_stage(int16_t v) {
-  manualCalibrationStage = (int8_t)v;
+  int8_t stage = (int8_t)v;
+  if (stage < 0) stage = 0;
+  if (stage >= (int8_t)NUM_OSCILLATORS) stage = (int8_t)(NUM_OSCILLATORS - 1);
+  manualCalibrationStage = stage;
 }
 
 static void apply_param_manual_calibration_offset(int16_t v) {
-  manualCalibrationOffset[(uint8_t)manualCalibrationStage / 2] = (int8_t)v;
-  // initManualAmpCompCalibrationVal[manualCalibrationStage / 2] =
-  //   initManualAmpCompCalibrationValPreset +
-  //   manualCalibrationOffset[manualCalibrationStage / 2]; // WAS WRONG ?
+  uint8_t stage = (uint8_t)manualCalibrationStage;
+  if (stage >= NUM_OSCILLATORS) stage = NUM_OSCILLATORS - 1;
+  manualCalibrationOffset[stage] = (int8_t)v;
 }
 
 // ---- Parameter table ------------------------------------------------
@@ -277,8 +292,11 @@ static const ParamDescriptorT<int16_t> paramTable[] = {
   { PARAM_LFO2_WAVEFORM,             apply_param_lfo2_waveform },
   { PARAM_OSC1_INTERVAL,             apply_param_osc1_interval },
   { PARAM_OSC2_INTERVAL,             apply_param_osc2_interval },
+  { PARAM_OSC3_INTERVAL,             apply_param_osc3_interval },
   { PARAM_OSC2_DETUNE_VAL,           apply_param_osc2_detune_val },
+  { PARAM_OSC3_DETUNE_VAL,           apply_param_osc3_detune_val },
   { PARAM_LFO2_TO_DETUNE2,           apply_param_lfo2_to_detune2 },
+  { PARAM_LFO2_TO_DETUNE3,           apply_param_lfo2_to_detune3 },
   { PARAM_OSC_SYNC_MODE,             apply_param_osc_sync_mode },
   { PARAM_PORTAMENTO_TIME,           apply_param_portamento_time },
   { PARAM_PORTAMENTO_MODE,           apply_param_portamento_mode },

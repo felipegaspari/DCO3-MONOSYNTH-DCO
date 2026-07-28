@@ -1,6 +1,6 @@
 void init_pwm()
 {
-  for (int i = 0; i < NUM_VOICES_TOTAL * 2; i++)
+  for (int i = 0; i < NUM_OSCILLATORS; i++)
   {
     gpio_set_function(RANGE_PINS[i], GPIO_FUNC_PWM);
     RANGE_PWM_SLICES[i] = pwm_gpio_to_slice_num(RANGE_PINS[i]);

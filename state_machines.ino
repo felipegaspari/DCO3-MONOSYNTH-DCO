@@ -2,8 +2,10 @@ void init_pio() {
 
   offset[0] = pio_add_program(pio[0], &frequency_sync_4_jumps_program);
   offset[1] = pio_add_program(pio[1], &frequency_sync_4_jumps_program);
+  offset[2] = pio_add_program(pio[2], &frequency_sync_4_jumps_program);
   // offset[0] = pio_add_program(pio[0], &frequency_program);
   // offset[1] = pio_add_program(pio[1], &frequency_program);
+  // offset[2] = pio_add_program(pio[2], &frequency_program);
   start_voice_sms();
 }
 
@@ -14,24 +16,31 @@ void start_voice_sms() {
     uint8_t sidesetPin;
     switch (syncMode) {
       case 0:
-        sidesetPin = 24;
+        // Free-running: self sideset (same policy as setSyncMode)
+        sidesetPin = RESET_PINS[i];
         break;
       case 1:
-        if (i == 0 || i == 2 || i == 4 || i == 6) {
-          sidesetPin = 24;
+        // OSC2 syncs from OSC1; OSC3 free-running
+        if (i == 1) {
+          sidesetPin = RESET_PINS[0];
         } else {
-          sidesetPin = RESET_PINS[i - 1];
+          sidesetPin = RESET_PINS[i];
         }
         break;
       case 2:
-        if (i == 0 || i == 2 || i == 4 || i == 6) {
-          sidesetPin = RESET_PINS[i + 1];
+        // OSC1 syncs from OSC2; OSC3 free-running
+        if (i == 0) {
+          sidesetPin = RESET_PINS[1];
         } else {
-          sidesetPin = 24;
+          sidesetPin = RESET_PINS[i];
         }
+        break;
+      default:
+        sidesetPin = RESET_PINS[i];
         break;
     }
 
+    // Freq only on SM0; amplitude uses RANGE PWM (not PIO).
     init_sm_sync(pio[VOICE_TO_PIO[i]], VOICE_TO_SM[i], offset[VOICE_TO_PIO[i]], RESET_PINS[i], sidesetPin);
 
     pio_sm_put(pio[VOICE_TO_PIO[i]], VOICE_TO_SM[i], pioPulseLength);

@@ -3,3 +3,4 @@
 *.bak
 .cursor/
 *.code-workspace
+_build_libs/

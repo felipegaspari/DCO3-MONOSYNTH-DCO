@@ -8,7 +8,7 @@ bool manualCalibrationFlag = false;
 bool firstTuneFlag = false;
 
 uint8_t manualCalibrationStage;
-int8_t manualCalibrationOffset[NUM_OSCILLATORS] = {0,0,0,0,0,0,0,0};
+int8_t manualCalibrationOffset[NUM_OSCILLATORS] = { 0, 0, 0 };
 /************************************************/
 /****************** DCO calibration ******************/
 
@@ -28,10 +28,11 @@ bool edgeDetectionLastVal = 0;
 volatile uint16_t ampCompCalibrationVal;
 int8_t initManualAmpCompCalibrationValPreset = 30;
 // weact rp2040 dco //volatile int8_t initManualAmpCompCalibrationVal[NUM_OSCILLATORS] = {24,26,25,25,25,18,20,25};
-int8_t initManualAmpCompCalibrationVal[NUM_OSCILLATORS] = {initManualAmpCompCalibrationValPreset,initManualAmpCompCalibrationValPreset,
-initManualAmpCompCalibrationValPreset,initManualAmpCompCalibrationValPreset,initManualAmpCompCalibrationValPreset,initManualAmpCompCalibrationValPreset,
-
-initManualAmpCompCalibrationValPreset,initManualAmpCompCalibrationValPreset};
+int8_t initManualAmpCompCalibrationVal[NUM_OSCILLATORS] = {
+  initManualAmpCompCalibrationValPreset,
+  initManualAmpCompCalibrationValPreset,
+  initManualAmpCompCalibrationValPreset
+};
 volatile uint16_t ampCompLowestFreqVal = 10;
 
 

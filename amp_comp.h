@@ -22,7 +22,7 @@ static constexpr int AMP_COMP_FAST_COEFF_FRAC = 5;
 static constexpr int AMP_COMP_FAST_SHIFT = AMP_COMP_FAST_COEFF_FRAC + AMP_COMP_FAST_T_FRAC;
 static constexpr int AMP_COMP_FAST_SLOPE_FRAC = 12;
 
-int32_t freq_to_amp_comp_array[352];
+int32_t freq_to_amp_comp_array[chanLevelVoiceDataSize * NUM_OSCILLATORS];
 uint8_t ampCompArraySize = FSVoiceDataSize / 4;
 
 int32_t ampCompFrequencyArray[NUM_OSCILLATORS][ampCompTableSize + 1];
