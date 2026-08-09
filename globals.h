@@ -9,11 +9,11 @@
 // Voice / oscillator counts (this board: 3 DCOs, up to 3 voice slots).
 //   NUM_OSCILLATORS     — physical DCOs (RANGE/RESET/PIO, amp-comp, drift, PW).
 //   NUM_VOICES_TOTAL    — voice-slot capacity (MIDI/ADSR/flags). Equals OSC for 1:1 para.
-//   NUM_VOICES_VOICE_TASK — legacy mono bind (=1); voice_task now loops NUM_VOICES_TOTAL.
+//   NUM_VOICES_VOICE_TASK — legacy mono bind (=1); one voice_task pass still drives 3 oscs.
 //   NUM_VOICES / STACK_VOICES (runtime below) — from setVoiceMode():
 //     0 mono: one MIDI voice → oscs 0..2
-//     1 paraphonic: voice i → osc i (planned)
-//     2 stub: DCO4 stack leftover (no new behavior yet)
+//     1 paraphonic: voice i → osc i (EnvDCO pitch tap per osc)
+//     2 stub: DCO4 stack leftover (no new stack behavior yet)
 #define NUM_VOICES_TOTAL 3
 #define NUM_VOICES_VOICE_TASK 1
 #define NUM_OSCILLATORS 3

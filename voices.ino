@@ -618,16 +618,33 @@ void __not_in_flash_func(voice_task_fixed_point)() {
 
       BENCH_BEGIN(vt_adsr_mod);
       // Same as LFO/drift: linear Q15 env × baked depth_q24 (exp is on the knob).
-      int32_t ADSRModifier_q24 = 0;
+      // ADSR3→pitch select: 0=OSC1, 1=OSC2, 2=OSC1+OSC2, 3=OSC3, 4=all.
+      // Mono: one tap. Para/stack: osc k ← ADSR1Level_q15[k].
+      int32_t ADSRModifierOSC1_q24 = 0;
+      int32_t ADSRModifierOSC2_q24 = 0;
+      int32_t ADSRModifierOSC3_q24 = 0;
       if (ADSR1toDETUNE1_scale_q24 != 0) {
-        ADSRModifier_q24 = applyDepthQ24(env_dco_pitch_wave_q15(ADSR1Level_q15[i]),
-                                         ADSR1toDETUNE1_scale_q24);
+        if (voiceMode == 0) {
+          const int32_t m = applyDepthQ24(env_dco_pitch_wave_q15(ADSR1Level_q15[i]),
+                                          ADSR1toDETUNE1_scale_q24);
+          if (ADSR3ToOscSelect == 0 || ADSR3ToOscSelect == 2 || ADSR3ToOscSelect == 4)
+            ADSRModifierOSC1_q24 = m;
+          if (ADSR3ToOscSelect == 1 || ADSR3ToOscSelect == 2 || ADSR3ToOscSelect == 4)
+            ADSRModifierOSC2_q24 = m;
+          if (ADSR3ToOscSelect == 3 || ADSR3ToOscSelect == 4)
+            ADSRModifierOSC3_q24 = m;
+        } else {
+          if (ADSR3ToOscSelect == 0 || ADSR3ToOscSelect == 2 || ADSR3ToOscSelect == 4)
+            ADSRModifierOSC1_q24 = applyDepthQ24(env_dco_pitch_wave_q15(ADSR1Level_q15[0]),
+                                                 ADSR1toDETUNE1_scale_q24);
+          if (ADSR3ToOscSelect == 1 || ADSR3ToOscSelect == 2 || ADSR3ToOscSelect == 4)
+            ADSRModifierOSC2_q24 = applyDepthQ24(env_dco_pitch_wave_q15(ADSR1Level_q15[1]),
+                                                 ADSR1toDETUNE1_scale_q24);
+          if (ADSR3ToOscSelect == 3 || ADSR3ToOscSelect == 4)
+            ADSRModifierOSC3_q24 = applyDepthQ24(env_dco_pitch_wave_q15(ADSR1Level_q15[2]),
+                                                 ADSR1toDETUNE1_scale_q24);
+        }
       }
-      // ADSR3→pitch select:
-      //   0 = OSC1, 1 = OSC2, 2 = OSC1+OSC2 (legacy), 3 = OSC3, 4 = all three
-      int32_t ADSRModifierOSC1_q24 = (ADSR3ToOscSelect == 0 || ADSR3ToOscSelect == 2 || ADSR3ToOscSelect == 4) ? ADSRModifier_q24 : 0;
-      int32_t ADSRModifierOSC2_q24 = (ADSR3ToOscSelect == 1 || ADSR3ToOscSelect == 2 || ADSR3ToOscSelect == 4) ? ADSRModifier_q24 : 0;
-      int32_t ADSRModifierOSC3_q24 = (ADSR3ToOscSelect == 3 || ADSR3ToOscSelect == 4) ? ADSRModifier_q24 : 0;
       BENCH_END(vt_adsr_mod);
 
       BENCH_BEGIN(vt_unison_mod);
@@ -1281,14 +1298,31 @@ void __not_in_flash_func(voice_task_float)() {
 
       // --- 2.4 ADSR detune (float equivalent of Q24) ---
       BENCH_BEGIN(vt_adsr_mod);
-      float ADSRModifier = 0.0f;
+      float ADSRModifierOSC1 = 0.0f;
+      float ADSRModifierOSC2 = 0.0f;
+      float ADSRModifierOSC3 = 0.0f;
       if (ADSR1toDETUNE1_scale_q24 != 0) {
-        ADSRModifier = q24_to_float(applyDepthQ24(
-            env_dco_pitch_wave_q15(ADSR1Level_q15[i]), ADSR1toDETUNE1_scale_q24));
+        if (voiceMode == 0) {
+          const float m = q24_to_float(applyDepthQ24(
+              env_dco_pitch_wave_q15(ADSR1Level_q15[i]), ADSR1toDETUNE1_scale_q24));
+          if (ADSR3ToOscSelect == 0 || ADSR3ToOscSelect == 2 || ADSR3ToOscSelect == 4)
+            ADSRModifierOSC1 = m;
+          if (ADSR3ToOscSelect == 1 || ADSR3ToOscSelect == 2 || ADSR3ToOscSelect == 4)
+            ADSRModifierOSC2 = m;
+          if (ADSR3ToOscSelect == 3 || ADSR3ToOscSelect == 4)
+            ADSRModifierOSC3 = m;
+        } else {
+          if (ADSR3ToOscSelect == 0 || ADSR3ToOscSelect == 2 || ADSR3ToOscSelect == 4)
+            ADSRModifierOSC1 = q24_to_float(applyDepthQ24(
+                env_dco_pitch_wave_q15(ADSR1Level_q15[0]), ADSR1toDETUNE1_scale_q24));
+          if (ADSR3ToOscSelect == 1 || ADSR3ToOscSelect == 2 || ADSR3ToOscSelect == 4)
+            ADSRModifierOSC2 = q24_to_float(applyDepthQ24(
+                env_dco_pitch_wave_q15(ADSR1Level_q15[1]), ADSR1toDETUNE1_scale_q24));
+          if (ADSR3ToOscSelect == 3 || ADSR3ToOscSelect == 4)
+            ADSRModifierOSC3 = q24_to_float(applyDepthQ24(
+                env_dco_pitch_wave_q15(ADSR1Level_q15[2]), ADSR1toDETUNE1_scale_q24));
+        }
       }
-      float ADSRModifierOSC1 = (ADSR3ToOscSelect == 0 || ADSR3ToOscSelect == 2 || ADSR3ToOscSelect == 4) ? ADSRModifier : 0.0f;
-      float ADSRModifierOSC2 = (ADSR3ToOscSelect == 1 || ADSR3ToOscSelect == 2 || ADSR3ToOscSelect == 4) ? ADSRModifier : 0.0f;
-      float ADSRModifierOSC3 = (ADSR3ToOscSelect == 3 || ADSR3ToOscSelect == 4) ? ADSRModifier : 0.0f;
       BENCH_END(vt_adsr_mod);
 
       BENCH_BEGIN(vt_unison_mod);
@@ -1676,7 +1710,7 @@ inline uint8_t get_free_voice() {
 
 // Map voiceMode → NUM_VOICES / STACK_VOICES. Called from init_voices and apply_param_voice_mode.
 //   0 mono:       one MIDI voice → oscs 0..2 (engine still bound by NUM_VOICES_VOICE_TASK)
-//   1 paraphonic: up to TOTAL notes, voice i → osc i (ownership in voice_task not wired yet)
+//   1 paraphonic: up to TOTAL notes, voice i → osc i (EnvDCO pitch tap per osc)
 //   2 stub:       DCO4 stack leftover — counts only; no new stack behavior
 inline void setVoiceMode() {
   switch (voiceMode) {

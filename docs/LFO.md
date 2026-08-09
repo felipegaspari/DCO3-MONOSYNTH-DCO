@@ -52,7 +52,7 @@ wave = env_dco_pitch_wave_q15(ADSR1Level_q15)   // unipolar: env; centered: (env
 ADSRModifier_q24 = applyDepthQ24(wave, ADSR1toDETUNE1_scale_q24)
 ```
 
-`PARAM_ADSR3_PITCH_MODE` (223, default **0 unipolar**) only changes how the Q15 tap becomes octaves; A/D/S/R still run. **Unipolar:** `applyDepthQ24(env, depth)` — sustain > 0 holds a pitch offset; idle (`env == 0`) is the note; full env @ full CW ≈ **+2 oct**. **Centered:** `applyDepthQ24((env − 16384) << 1, depth)` — mid sustain ≈ the played note (or current porta Hz); higher S holds sharp, lower S flat; idle/start ≈ **−2 oct**, peak ≈ **+2 oct**. PW stays unipolar.
+`PARAM_ADSR3_PITCH_MODE` (223, default **0 unipolar**) only changes how the Q15 tap becomes octaves; A/D/S/R still run. **Unipolar:** `applyDepthQ24(env, depth)` — sustain > 0 holds a pitch offset; idle (`env == 0`) is the note; full env @ full CW ≈ **+2 oct**. **Centered:** `applyDepthQ24((env − 16384) << 1, depth)` — mid sustain ≈ the played note (or current porta Hz); higher S holds sharp, lower S flat; idle/start ≈ **−2 oct**, peak ≈ **+2 oct**. PW stays unipolar. Mono uses one EnvDCO tap for all selected oscs; para/stack uses `ADSR1Level_q15[k]` on osc k (still gated by `ADSR3ToOscSelect`).
 
 - **Env:** linear Q15 (no `linToLog`). Full env ≈ `depth_q24` of travel.
 - **Knob bake** ([`params.ino`](../params.ino) `apply_param_adsr1_to_detune1`): signed `expConverterFloat(|v|, 500)`, normalized to `ADSR_PITCH_DEPTH_PANEL_FULL` (511), then × `ADSR_PITCH_MAX_OCTAVES` → Q24.

@@ -58,18 +58,50 @@ SysTick. `0` = 1 µs timer for **all** probes. Dump window (1 s gate) always use
 (autotune / wrap-looking stalls). Still every-iter PERIOD vs stride-9 stages.
 
 **Period-only vs full MAIN.** Same preset, same play: compare `loop` / `loop1` mean **and
-max**. Full MAIN without sampling used to be ~2× period-only (worked example on RP2040 @
-240 MHz: loop1 **109 µs** vs **59 µs**). That gap is instrumentation, not synth speed:
+max**. Full MAIN is slower than period-only because of instrumentation, not synth speed
+(shipping RP2040 @ 240 MHz Q16: loop1 **25.90 µs** stride-9 MAIN vs **17.47 µs** period-only,
+≈ **+8.4 µs** dump-10 tax). Do not mix the two modes.
 
 1. Each child's `BENCH_END` bookkeeping sits in the **parent** `(unattributed)` (~18 MAIN
-   kids under `voice_task` → ~24 µs/iter + ~10 µs `loop1` unattributed). Overhead subtract is
-   only ~2 SysTick cyc.
-2. `volatile` BEGIN barriers change codegen (~10–15 µs extra real work).
-3. Slower loop1 makes ~99 µs ADSR/CV fire on more iterations (~4 µs extra per loop1).
+   kids under `voice_task`). Overhead subtract is only ~2 SysTick cyc.
+2. `volatile` BEGIN barriers change codegen.
+3. Slower loop1 makes ~99 µs ADSR/CV fire on more iterations.
 
 Use **period-only** for “is the synth faster?”. Use MAIN **`%win` / child means** to rank
-where time goes — never compare full vs period absolute loop means. With stride 9, full dump
-`loop1` mean should sit near period-only (~59 + ~1/9 of tax ≈ **~65 µs**).
+where time goes — never compare full vs period absolute loop means. Stride 9 still carries
+probe tax (here +8.4 µs); it is not “period-only + 1/9”.
+
+### Shipping RP2040 Q16 baseline
+
+Same machine / play (pitch-mod + porta on): `clk_sys` **240 MHz**,
+`mcu=RP2040` `voice=FIXED` `pitch=RATIO_Q16` `clkdiv=Q16` `amp=FIXED` `cv=FIXED`
+`amp_method=FIXED` `note_retrig=EXACT_Y`, `sram_hot=1` (ADSR + LFO), `path_stats=0`,
+`cv_outs=0`.
+
+**Period-only** (`RUNNING_AVERAGE_PERIOD`):
+
+| Probe | mean | min | max |
+|-------|------|-----|-----|
+| Core0 `loop period` | **8.79** | 5.80 | **72.18** |
+| Core1 `loop1 period` | **17.47** | 14.75 | **71.13** |
+
+**Full MAIN** (`RUNNING_AVERAGE`, `BENCH_STAGE_STRIDE` 9, banner `stages every 9`):
+
+| Probe | mean | min | max | %win |
+|-------|------|-----|-----|------|
+| Core0 `loop period` | **10.61** | 7.29 | 62.00 | 99.97 |
+| Core0 `MIDI read` | 3.20 | | | **30.15** |
+| Core1 `loop1 period` | **25.90** | 19.86 | 99.13 | 99.98 |
+| `voice_task TOTAL` | 26.21 | 21.28 | 79.42 | 101.18 |
+| `amp comp` | 4.73 | | | **18.25** |
+| `clkdiv math` | 4.00 | | | **15.42** |
+| `portamento` | 2.02 | | | 7.80 |
+| `ratio interpolate` | 1.74 | | | 6.69 |
+| `ADSR_update` | 2.63 | | | 2.61 |
+| `update_CV_outs` | 126c | | | **0.52** |
+
+`voice_task` `%win` > 100 and loop1 `(over-attributed)` (−11.84%) is stride-9 bookkeeping,
+not extra DSP. Re-capture after engine/flag changes; keep the dump tree in §3 as shape only.
 
 Reports go out the USB CDC port. They are **off by default even with profiling compiled in**
 — ask for them with a debug command.
