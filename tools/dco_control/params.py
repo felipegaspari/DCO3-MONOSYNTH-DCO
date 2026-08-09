@@ -219,7 +219,7 @@ PARAMS: list[Param] = [
           cc=25),
     Param(47, "ADSR3 to OSC1 detune", GROUP_ENV, "slider", -511, 511, 0, cc=26),
     Param(223, "EnvDCO pitch centered", GROUP_ENV, "check", default=0,
-          note="off = unipolar env×depth; on = env−16384 so mid sustain ≈ note; idle stays on note. PW stays unipolar."),
+          note="off = unipolar env×depth; on = (env−16384)×2 so mid sustain ≈ note, ±2 oct @ full CW. PW stays unipolar."),
     Param(48, "ADSR1 attack curve", GROUP_ENV, "slider", 0, 7, 0, cc=27),
     Param(49, "ADSR1 decay curve", GROUP_ENV, "slider", 0, 7, 0, cc=28),
     Param(50, "ADSR2 attack curve", GROUP_ENV, "slider", 0, 7, 0, cc=29),

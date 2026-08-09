@@ -69,14 +69,14 @@ uint16_t ADSRMinLevel = 0;
 // 0=OSC1, 1=OSC2, 2=OSC1+OSC2, 3=OSC3, 4=all
 int8_t ADSR3ToOscSelect = 2;
 
-// EnvDCO → pitch: 0 = unipolar env×depth (default); 1 = centered (env−16384; mid S ≈ note).
+// EnvDCO → pitch: 0 = unipolar env×depth (default); 1 = centered ((env−16384)<<1; mid S ≈ note, ±2 oct @ full CW).
 uint8_t env_dco_pitch_centered = 0;
 static constexpr int16_t ENV_DCO_PITCH_CENTER_Q15 = 16384;
 
 static inline int16_t env_dco_pitch_wave_q15(int16_t env_q15) {
-  if (!env_dco_pitch_centered || env_q15 == 0)
+  if (!env_dco_pitch_centered)
     return env_q15;
-  return (int16_t)((int32_t)env_q15 - ENV_DCO_PITCH_CENTER_Q15);
+  return (int16_t)(((int32_t)env_q15 - ENV_DCO_PITCH_CENTER_Q15) << 1);
 }
 
 uint16_t ADSR1_attack = 0;

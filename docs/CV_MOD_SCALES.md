@@ -174,7 +174,7 @@ VCF ≈ 4095 - clamp( (ADSR_mod + LFO2_mod + CUTOFF + VCF_DRIFT + matrix_cutoff)
 | Path | Where | Pattern |
 |------|--------|---------|
 | LFO → pitch | [`params.ino`](../params.ino) → `*_q24` | `lfo_pitch_depth_q24(amt, LFO*_PITCH_DEPTH_SCALE)` — [`LFO.h`](../LFO.h) / [`LFO.md`](LFO.md) |
-| EnvDCO → pitch | `ADSR1toDETUNE1_scale_q24` | exp knob → norm × `ADSR_PITCH_MAX_OCTAVES` → Q24; hot `applyDepthQ24(env_dco_pitch_wave_q15(env), depth)` (unipolar or env−16384) — [`LFO.md`](LFO.md) |
+| EnvDCO → pitch | `ADSR1toDETUNE1_scale_q24` | exp knob → norm × `ADSR_PITCH_MAX_OCTAVES` → Q24; hot `applyDepthQ24(env_dco_pitch_wave_q15(env), depth)` (unipolar or (env−16384)<<1) — [`LFO.md`](LFO.md) |
 | Drift → pitch | `drift_pitch_scale_q24` | `analogDrift * DRIFT_PITCH_UNIT_Q24 * DRIFT_PITCH_DEPTH_SCALE` |
 | ADSR → PW | `ADSR1toPWM_scale` | Legacy `(level_u12 * depth) >> 11` peak → `(q15 * scale) >> 15` |
 | Character | [`CHARACTER.md`](CHARACTER.md) | `character_recompute_scales()` → `char_*_scale_q15` |

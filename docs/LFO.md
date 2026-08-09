@@ -48,11 +48,11 @@ LFO1 is deeper than LFO2 fine at the same panel curve by design (1700 vs 512). C
 Hot path ([`voices.ino`](../voices.ino)):
 
 ```text
-wave = env_dco_pitch_wave_q15(ADSR1Level_q15)   // unipolar: env; centered: env−16384 (idle 0)
+wave = env_dco_pitch_wave_q15(ADSR1Level_q15)   // unipolar: env; centered: (env−16384)<<1
 ADSRModifier_q24 = applyDepthQ24(wave, ADSR1toDETUNE1_scale_q24)
 ```
 
-`PARAM_ADSR3_PITCH_MODE` (223, default **0 unipolar**) only changes how the Q15 tap becomes octaves; A/D/S/R still run. **Unipolar:** `applyDepthQ24(env, depth)` — sustain > 0 holds a pitch offset; idle (`env == 0`) is the note. **Centered:** `applyDepthQ24(env − 16384, depth)` when env ≠ 0 — mid sustain ≈ the played note (or current porta Hz); higher S holds sharp, lower S flat; idle still snaps to the note. PW stays unipolar. Release from mid S may pass below the note before idle — no snapshot.
+`PARAM_ADSR3_PITCH_MODE` (223, default **0 unipolar**) only changes how the Q15 tap becomes octaves; A/D/S/R still run. **Unipolar:** `applyDepthQ24(env, depth)` — sustain > 0 holds a pitch offset; idle (`env == 0`) is the note; full env @ full CW ≈ **+2 oct**. **Centered:** `applyDepthQ24((env − 16384) << 1, depth)` — mid sustain ≈ the played note (or current porta Hz); higher S holds sharp, lower S flat; idle/start ≈ **−2 oct**, peak ≈ **+2 oct**. PW stays unipolar.
 
 - **Env:** linear Q15 (no `linToLog`). Full env ≈ `depth_q24` of travel.
 - **Knob bake** ([`params.ino`](../params.ino) `apply_param_adsr1_to_detune1`): signed `expConverterFloat(|v|, 500)`, normalized to `ADSR_PITCH_DEPTH_PANEL_FULL` (511), then × `ADSR_PITCH_MAX_OCTAVES` → Q24.
