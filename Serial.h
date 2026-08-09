@@ -7,7 +7,7 @@
 #include "serial_frame.h"
 #include "serial_parser.h"
 
-// Serial1 = DIN MIDI @ 31250; Serial2 = Input panel protocol + slim 'x' TX @ 2.5M.
+// Serial1 = DIN MIDI @ 31250; Serial2 = Input panel protocol + slim 'x'/'p' TX @ 2.5M.
 // Screen has no DCO port: Input relays gap 154 to it on its own Screen port.
 
 void init_serial();
@@ -20,5 +20,8 @@ void serial_usb_task();
 #endif
 
 void serialSendParam32(byte paramNumber, uint32_t paramValue);
+void serialSendParam16(byte paramNumber, int16_t paramValue);
+// Echo LittleFS-persistable 'p' to Input (USB/MIDI only; never Input→DCO loop).
+void serial_echo_persistable_param16(uint8_t id, int16_t value);
 
 #endif

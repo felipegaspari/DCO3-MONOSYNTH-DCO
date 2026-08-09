@@ -752,7 +752,7 @@ MIDI CC control surface: the `MIDI_CC_LINEAR` / `MIDI_CC_EXP_TIME` curves, the `
 - `midi_cc_handle()` — Find the controller in `midiCcMap[]`, scale it into `lo..hi`, apply the exp curve for envelope times, then `midi_cc_apply()`. Unmapped CCs ignored.
   - **Called from:** `handleControlChange()`.
   - **When:** MIDI callback.
-- `midi_cc_apply()` — Dispatch: a `CC_LOCAL_*` target writes ADSR/filter block globals here (`cv_bake_adsr2_to_vcf_scale` / `cv_bake_lfo2_to_vcf_scale` for the matching depth CC; CUTOFF/RESONANCE assign without scale bake). PW (`PARAM_PW_VALUE`) and EnvVCA→VCA (`PARAM_ADSR1_TO_VCA`) and every other mapped ParamId go to `update_parameters()`.
+- `midi_cc_apply()` — Dispatch: a `CC_LOCAL_*` target writes ADSR/filter block globals here (`cv_bake_adsr2_to_vcf_scale` / `cv_bake_lfo2_to_vcf_scale` for the matching depth CC; CUTOFF/RESONANCE assign without scale bake). PW (`PARAM_PW_VALUE`) and EnvVCA→VCA (`PARAM_ADSR1_TO_VCA`) and every other mapped ParamId go to `update_parameters()` plus `serial_echo_persistable_param16()`.
   - **Called from:** `midi_cc_handle()`.
   - **When:** MIDI callback.
 - `handleProgramChange()` — Stub / empty as implemented.
@@ -790,21 +790,27 @@ Prototype. **No function definitions.**
 - `input_handle_filter_block()` — `'d'` LE → `CUTOFF`, `RESONANCE`, `ADSR2toVCF`, `LFO2toVCF`, then `cv_bake_adsr2_to_vcf_scale()` + `cv_bake_lfo2_to_vcf_scale()`.
   - **Called from:** parser LUT.
   - **When:** Serial RX.
-- `input_handle_param16()` — `'p'` → `update_parameters` (id + i16 LE).
+- `input_handle_param16()` — `'p'` → `update_parameters` (id + i16 LE); USB ingress also `serial_echo_persistable_param16`.
   - **Called from:** parser LUT.
   - **When:** Serial RX.
 - `input_handle_preset_name()` — `'q'` → `presetName[]` (8 chars).
   - **Called from:** parser LUT.
   - **When:** Serial RX.
-- `serial_panel_task()` — Non-blocking parser pump (`serial_parser_drain`). `__not_in_flash_func`.
+- `serial_panel_task()` — Non-blocking parser pump (`serial_parser_drain`). Sets ingress `PARAM_SRC_INPUT`. `__not_in_flash_func`.
   - **Called from:** `loop()` when `timer1msFlag`.
   - **When:** Realtime Core0, ~1 ms.
 - `init_usb()` — TinyUSB CDC+MIDI descriptors, `Serial.begin`, re-enumerate.
   - **Called from:** `setup()`.
   - **When:** Boot Core0.
-- `serial_usb_task()` — Same pump for USB CDC: second `SerialParserContext`, same LUT. Guarded by `ENABLE_USB_CONTROL`; returns if `!Serial`. `__not_in_flash_func`. See [`tools/dco_control`](../tools/dco_control/README.md).
+- `serial_usb_task()` — Same pump for USB CDC: second `SerialParserContext`, same LUT. Sets ingress `PARAM_SRC_USB` so persistable `'p'` echoes to Input. Guarded by `ENABLE_USB_CONTROL`; returns if `!Serial`. `__not_in_flash_func`. See [`tools/dco_control`](../tools/dco_control/README.md).
   - **Called from:** `loop()` when `timer1msFlag`.
   - **When:** Realtime Core0, ~1 ms, only when `ENABLE_USB_CONTROL` is defined and CDC is open.
+- `serialSendParam16()` — Slim `'p'` TX via `serial_frame_write` (id + i16 LE, 3 B) out Serial2. Drops if `availableForWrite() < 1`.
+  - **Called from:** `serial_echo_persistable_param16()`.
+  - **When:** USB/MIDI apply of a persistable id.
+- `serial_echo_persistable_param16()` — If id is LittleFS-persistable, `serialSendParam16` (wire i16, not Q24). Skips cal/debug/UI and `'a'`–`'d'`.
+  - **Called from:** `input_handle_param16()` (USB ingress); `midi_cc_apply()` default.
+  - **When:** USB/MIDI apply of a persistable id.
 - `serialSendParam32()` — Slim `'x'` TX via `serial_frame_write` (id + u32 LE, 5 B) out Serial2 TX 20 into Input `Serial1` RX GP1 (gap 154, cal 155; Input relays 154 to Screen). Drops if `availableForWrite() < 1`.
   - **Called from:** `apply_param_manual_calibration_flag()`; `DCO_calibration_debug()`.
   - **When:** Manual-cal param / live gap report.
@@ -815,7 +821,7 @@ Compatibility stub that includes `serial_input_protocol.h`. Mainboard `'n'`/`'o'
 
 ### `serial_input_protocol.h`
 
-Command bytes + payload sizes + `serial_input_payload_len()`. **No other function definitions.**
+Command bytes + payload sizes + `serial_input_payload_len()`. `'p'` is Input→DCO apply and DCO→Input persistable mirror. **No other function definitions.**
 
 ### `serial_frame.h`
 
@@ -839,7 +845,7 @@ Inner pack/unpack + buffer COBS encode/decode + `serial_frame_stuff` / `unstuff`
 - `decode_param_p()` — Decode `'p'` `[id][i16 LE]`.
   - **Called from:** `input_handle_param16()`.
 - `encode_param_p()` — Encode `'p'` payload.
-  - **Called from:** **none on DCO** (Input TX / host tool).
+  - **Called from:** `serialSendParam16()` (DCO→Input persistable mirror).
 - `encode_param32()` — Encode slim `'x'` payload (id + u32 LE).
   - **Called from:** `serialSendParam32()`.
 

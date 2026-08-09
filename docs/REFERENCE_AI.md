@@ -297,12 +297,13 @@ Related docs:
     - Commands (LE, no finish byte; `0x00` reserved as COBS delimiter):
       - `'a'` / `'b'` / `'c'` – 4×16‑bit ADSR blocks → EnvVCA / EnvVCF / EnvDCO (`ADSR1_*`) times.
       - `'d'` – filter block → `CUTOFF`, `RESONANCE`, `ADSR2toVCF`, `LFO2toVCF`, then `cv_bake_adsr2_to_vcf_scale()` + `cv_bake_lfo2_to_vcf_scale()`. Depth bake / peak math: [`CV_MOD_SCALES.md`](CV_MOD_SCALES.md).
-      - `'p'` – ParamId + int16 LE → `update_parameters()` (includes PW 210, EnvVCA→VCA 222, EnvDCO pitch mode 223).
+      - `'p'` – ParamId + int16 LE → `update_parameters()` (includes PW 210, EnvVCA→VCA 222, EnvDCO pitch mode 223). USB/`dco_control` and MIDI also echo persistable `'p'` back to Input (LittleFS RAM); panel Serial2 ingress never echoes (loop prevention).
       - `'q'` – 8‑char preset name → `presetName[]`.
     - O(1) command LUT; 500 µs timeout only when mid-frame and the stream is idle; drain budget 64.
     - On-wire default is RAW (= inner). `#define SERIAL_FRAMING_COBS` wraps the same inner payloads as `COBS(inner)+0x00`; host: `dco_control --cobs` / `DCO_SERIAL_COBS=1`. Must match Input/Screen. Buffer codec in `serial_frame.h` is reusable for SPI later.
   - Outgoing helper:
     - `serialSendParam32()` – slim `'x'` via `serial_frame_write` (gap 154, cal offsets 155) out on Serial2 TX 20, received by the Input on its `Serial1`. Payload 5 = `[id][u32 LE]`. Drops if `availableForWrite() < 1`.
+    - `serialSendParam16()` / `serial_echo_persistable_param16()` – slim `'p'` `[id][i16 LE]` for LittleFS-persistable USB/MIDI applies (wire value, not Q24). Input stores locals only (ADSR3→PWM wire − 512) and forwards the same `'p'` to Screen toasts.
   - `serial_panel_task()` / `serial_usb_task()` are the parser pumps, called from `loop()` on `timer1msFlag`. USB/DIN MIDI `.read()` still runs every iteration (`turnThruOff`).
   - Shared headers: `serial_input_protocol.h`, `serial_frame.h`, `serial_param_protocol.h`, `serial_parser.h`. How-to: [`README_serial_and_params.md`](README_serial_and_params.md).
 

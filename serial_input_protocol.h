@@ -23,7 +23,7 @@ enum InputSerialCmd : uint8_t {
   INPUT_CMD_ADSR2_BLOCK  = 'b',  // EnvVCF times
   INPUT_CMD_ADSR3_BLOCK  = 'c',  // EnvDCO times (maps to ADSR1_* on DCO)
   INPUT_CMD_FILTER_BLOCK = 'd',
-  INPUT_CMD_PARAM_16     = 'p',  // id + int16 LE
+  INPUT_CMD_PARAM_16     = 'p',  // id + int16 LE (Input→DCO + DCO→Input persistable mirror)
   INPUT_CMD_PRESET_NAME  = 'q',  // 8 ASCII chars
   INPUT_CMD_PARAM_32     = 'x',  // id + u32 LE (gap 154 / cal 155 DCO→Input)
 };

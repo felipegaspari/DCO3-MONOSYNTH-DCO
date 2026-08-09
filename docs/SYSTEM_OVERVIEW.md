@@ -46,14 +46,14 @@ flowchart LR
 |------|------|-------|------|
 | DCO `Serial1` | 31250 | DIN MIDI | MIDI in (RX1 / TX0) — interim HW; PIO MIDI later |
 | DCO `Serial2` **RX GP21** | 2.5M | Input `Serial1` **TX GP0** | Panel in (slim `'a'`–`'d'`, `'p'`, `'q'`; LE, no finish). Input firmware still sends the old BE format until updated. Same TX may fan out to RP2040 aux RX ([`DUAL_MCU.md`](DUAL_MCU.md)) |
-| DCO `Serial2` **TX GP20** | 2.5M | Input `Serial1` **RX GP1** | Gap/offset `'x'` 154 / 155 out (DCO only — aux never TX) |
+| DCO `Serial2` **TX GP20** | 2.5M | Input `Serial1` **RX GP1** | Gap/offset `'x'` 154 / 155 + persistable `'p'` mirror out (DCO only — aux never TX) |
 | Input `Serial2` **TX GP4** | 2.5M | Screen `Serial1` **RX GP13** | UI frames / preset names + forwarded gap `'x'` 154 |
 
 On a Pico the silkscreen `UART0` is GP0/GP1 and is Arduino-Pico's `Serial1`; `UART1` is `Serial2`.
 
 The DCO↔Input link is one two-way UART pair on each side: the DCO's `Serial2` (TX GP20 / RX GP21) against the Input's `Serial1` (TX GP0 / RX GP1). The Input reaches the Screen on its other UART, `Serial2` TX GP4, whose RX (GP5) has no conductor since the Screen never transmits.
 
-Gap (`PARAM_GAP_FROM_DCO` 154) and cal offsets (`PARAM_MANUAL_CALIBRATION_OFFSET_FROM_DCO` 155) both TX out the DCO's `Serial2` TX, the DCO's only peer link. Input receives them on its `Serial1` RX, keeps 155 and forwards 154 verbatim to Screen. The DCO has no Screen port and no PIO software UART: `serial_read_from_dco()` on Input is the sole relay.
+Gap (`PARAM_GAP_FROM_DCO` 154) and cal offsets (`PARAM_MANUAL_CALIBRATION_OFFSET_FROM_DCO` 155) both TX out the DCO's `Serial2` TX, the DCO's only peer link. Input receives them on its `Serial1` RX, keeps 155 and forwards 154 verbatim to Screen. Persistable USB/MIDI `'p'` IDs use the same TX for LittleFS RAM mirror (panel ingress never echoes). The DCO has no Screen port and no PIO software UART: `serial_read_from_dco()` on Input is the sole relay.
 
 Note edges never leave the DCO. `noteStart[]` / `noteEnd[]` drive EnvDCO/EnvVCA/EnvVCF locally, so the old `'n'`/`'o'` note frames are gone.
 

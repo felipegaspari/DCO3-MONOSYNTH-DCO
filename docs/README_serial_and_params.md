@@ -20,7 +20,7 @@ speaks the same inner frames for [`tools/dco_control`](../tools/dco_control/READ
 
 **USB bench link:** `serial_usb_task()` uses a second `SerialParserContext` and the same LUT as Serial2. Only host → DCO is framed; DCO → host is plain debug text. Panel Serial2 and USB CDC drain on Core 0 `timer1msFlag` (~1 ms). USB/DIN MIDI still runs every `loop()`. CDC drain is skipped when the host has not opened `Serial`.
 
-**MIDI CC:** `midi_cc_apply()` writes ADSR/filter block globals directly (`CC_LOCAL_*`). Everything else, including `PARAM_PW_VALUE` and `PARAM_ADSR1_TO_VCA`, goes through `update_parameters()`.
+**MIDI CC:** `midi_cc_apply()` writes ADSR/filter block globals directly (`CC_LOCAL_*`). Everything else, including `PARAM_PW_VALUE` and `PARAM_ADSR1_TO_VCA`, goes through `update_parameters()`. Persistable ParamId CCs also `serial_echo_persistable_param16()` so Input LittleFS save matches what you hear. `'a'`–`'d'` domains are not mirrored.
 
 ---
 
@@ -32,7 +32,7 @@ Little-endian multi-byte fields. No finish byte. `0x00` is reserved (COBS delimi
 |-----|---------|---------|
 | `'a'`/`'b'`/`'c'` | 8 | ADSR A,D,S,R as `uint16`. A/D/R exp-mapped 0..25000; S linear. Direct globals + dirty flags — **not** `update_parameters` |
 | `'d'` | 8 | `CUTOFF`, `RESONANCE`, `ADSR2toVCF`, `LFO2toVCF` + scale bake |
-| `'p'` | 3 | `[id:u8][value:i16]` → `update_parameters` |
+| `'p'` | 3 | `[id:u8][value:i16]` → `update_parameters`. Also DCO→Input persistable mirror (USB/MIDI only; never panel ingress) |
 | `'q'` | 8 | Preset name, 8 ASCII chars |
 | `'x'` | 5 | DCO→Input `[id:u8][value:u32 LE]` (gap 154 / cal 155); `serial_frame_write` |
 

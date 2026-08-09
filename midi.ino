@@ -131,7 +131,10 @@ void midi_cc_apply(uint8_t target, int16_t value) {
     case CC_LOCAL_FILTER_ADSR2_TO_VCF:  ADSR2toVCF = value;           cv_bake_adsr2_to_vcf_scale(); break;
     case CC_LOCAL_FILTER_LFO2_TO_VCF:   LFO2toVCF  = (uint16_t)value; cv_bake_lfo2_to_vcf_scale(); break;
 
-    default:                            update_parameters((uint16_t)target, value); break;
+    default:
+      update_parameters((uint16_t)target, value);
+      serial_echo_persistable_param16(target, value);
+      break;
   }
 }
 
