@@ -75,7 +75,7 @@ A classic **128-slot** program bar sits under the connection toolbar:
 | **Prev / Next** / program number | Select slot **0–127** and load it immediately (empty slots load Init defaults) |
 | **Load** | Reload the current slot from disk, discarding unsaved edits |
 | **Save** | Store the current UI into the current slot (keeps the name) |
-| **Save as…** | Prompt for a name, then save into the current slot |
+| **Save as…** | Prompt for slot (0–127) and name, then save there and switch to that slot |
 | **Init** | Set patch controls to `params.py` defaults (slot number unchanged); mark dirty until Save |
 
 A leading `*` beside the name means the UI differs from the last loaded or saved snapshot.
@@ -102,7 +102,7 @@ bench-only buttons:
 | Tab | Contents |
 |-----|----------|
 | Oscillators | Pitch/Sync left, Voice & drift right; levels and wave matrix full-width at the bottom |
-| Envelopes | Three vertical ADSR time columns side by side; curve params as spinboxes; routing and rest below |
+| Envelopes | Three vertical ADSR time columns side by side; curve params as named combos; routing and rest below |
 | Filter | Cutoff, resonance, envelope and LFO amounts, keytrack, distortion Drive/Mix |
 | PWM | Pulse width, LFO2 and envelope to PW |
 | LFOs | Waveforms, speeds, and the LFO routing depths |

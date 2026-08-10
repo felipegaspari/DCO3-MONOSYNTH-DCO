@@ -19,7 +19,7 @@ import queue
 import sys
 import threading
 import tkinter as tk
-from tkinter import simpledialog, ttk
+from tkinter import messagebox, simpledialog, ttk
 
 import params
 import presets
@@ -372,8 +372,9 @@ class App:
     def _preset_load(self) -> None:
         self._preset_recall(self._preset_slot_index(), send=True, persist_current=True)
 
-    def _preset_save(self) -> None:
-        index = self._preset_slot_index()
+    def _preset_save(self, index: int | None = None) -> None:
+        if index is None:
+            index = self._preset_slot_index()
         typed = self.preset_name_var.get().strip()
         existing = self.bank["slots"][index]
         if typed:
@@ -393,15 +394,31 @@ class App:
         self.log(f"[preset] saved {index:03d} {name}\n")
 
     def _preset_save_as(self) -> None:
-        current = self.preset_name_var.get().strip() or "Untitled"
+        current_index = self._preset_slot_index()
+        dest = simpledialog.askinteger(
+            "Save as…", "Slot (0–127):",
+            initialvalue=current_index, minvalue=0, maxvalue=presets.NUM_SLOTS - 1,
+            parent=self.root,
+        )
+        if dest is None:
+            return
+        existing = self.bank["slots"][dest]
+        if dest != current_index and not presets.slot_is_empty(existing):
+            if not messagebox.askyesno(
+                "Save as…",
+                f"Slot {dest:03d} already has “{existing['name']}”. Overwrite?",
+                parent=self.root,
+            ):
+                return
+        current_name = self.preset_name_var.get().strip() or "Untitled"
         name = simpledialog.askstring(
-            "Save as…", "Preset name:", initialvalue=current, parent=self.root
+            "Save as…", "Preset name:", initialvalue=current_name, parent=self.root
         )
         if name is None:
             return
         name = name.strip()[:48] or "Untitled"
         self.preset_name_var.set(name)
-        self._preset_save()
+        self._preset_save(dest)
 
     def _preset_init(self) -> None:
         self._preset_loading = True
@@ -763,21 +780,24 @@ class App:
     def _add_env_curve_spin(self, cell: ttk.Frame, p: params.Param, short_label: str) -> None:
         cell.columnconfigure(0, weight=1)
         ttk.Label(cell, text=short_label).grid(row=0, column=0)
-        var = tk.DoubleVar(value=p.default)
+        labels = [c[0] for c in p.choices]
+        lookup = dict(p.choices)
+        var = tk.StringVar(value=next((c[0] for c in p.choices if c[1] == p.default), labels[0]))
         self.param_vars[p.pid] = var
 
-        def on_spin(pid=p.pid, var=var):
+        def on_pick(_e=None, pid=p.pid, var=var, lookup=lookup):
             if self._preset_loading:
                 return
-            self.queue_param(pid, ivar(var))
+            self.queue_param(pid, lookup[var.get()])
 
-        spin = ttk.Spinbox(cell, from_=p.lo, to=p.hi, textvariable=var, width=4,
-                           command=on_spin)
-        spin.grid(row=1, column=0, pady=4)
+        combo = ttk.Combobox(cell, textvariable=var, values=labels, state="readonly",
+                             width=18)
+        combo.grid(row=1, column=0, pady=4, sticky="ew")
+        combo.bind("<<ComboboxSelected>>", on_pick)
         tip = f"{p.label}  [{p.pid}]"
         if p.note:
             tip += f"\n{p.note}"
-        self._tooltip(spin, tip)
+        self._tooltip(combo, tip)
 
     def _add_env_curve_column(self, parent: ttk.Frame, column: int, title: str,
                               attack_pid: int | None, decay_pid: int | None,

@@ -154,6 +154,31 @@ def _phase_choices() -> tuple:
     return tuple(entries)
 
 
+# Bézier curve indices 0–7; names match SCREEN displayParams.ino (attack vs decay
+# differ because attack uses the reversed tables). Decay's screen case 8 LINEAR is
+# unreachable (firmware/encoder clamp to 7) and is omitted.
+_ENV_ATTACK_CURVES = (
+    ("0 - EXP", 0),
+    ("1 - SOFT", 1),
+    ("2 - STEEP", 2),
+    ("3 - CONCAVE", 3),
+    ("4 - FAST S", 4),
+    ("5 - SLOW THEN LIN", 5),
+    ("6 - ALMOST LIN", 6),
+    ("7 - LINEAR", 7),
+)
+_ENV_DECAY_CURVES = (
+    ("0 - EXP", 0),
+    ("1 - SOFT", 1),
+    ("2 - STEEP", 2),
+    ("3 - CONVEX", 3),
+    ("4 - FAST START S", 4),
+    ("5 - SLOW THEN LIN", 5),
+    ("6 - FAST THEN LIN", 6),
+    ("7 - ALMOST LIN", 7),
+)
+
+
 PARAMS: list[Param] = [
     # --- Oscillators (pitch, sync, voice, levels, wave enables) ---
     # Wire value is biased: table_index = midi - 36 + value (36 ⇒ unison).
@@ -220,10 +245,14 @@ PARAMS: list[Param] = [
     Param(47, "ADSR3 to OSC1 detune", GROUP_ENV, "slider", -511, 511, 0, cc=26),
     Param(223, "EnvDCO pitch centered", GROUP_ENV, "check", default=0,
           note="off = unipolar env×depth; on = (env−16384)×2 so mid sustain ≈ note, ±2 oct @ full CW. PW stays unipolar."),
-    Param(48, "ADSR1 attack curve", GROUP_ENV, "slider", 0, 7, 0, cc=27),
-    Param(49, "ADSR1 decay curve", GROUP_ENV, "slider", 0, 7, 0, cc=28),
-    Param(50, "ADSR2 attack curve", GROUP_ENV, "slider", 0, 7, 0, cc=29),
-    Param(51, "ADSR2 decay curve", GROUP_ENV, "slider", 0, 7, 0, cc=30),
+    Param(48, "ADSR1 attack curve", GROUP_ENV, "combo", default=0,
+          choices=_ENV_ATTACK_CURVES, cc=27),
+    Param(49, "ADSR1 decay curve", GROUP_ENV, "combo", default=0,
+          choices=_ENV_DECAY_CURVES, cc=28),
+    Param(50, "ADSR2 attack curve", GROUP_ENV, "combo", default=0,
+          choices=_ENV_ATTACK_CURVES, cc=29),
+    Param(51, "ADSR2 decay curve", GROUP_ENV, "combo", default=0,
+          choices=_ENV_DECAY_CURVES, cc=30),
     Param(8, "VCA ADSR restart", GROUP_ENV, "check", default=0, cc=31),
     Param(9, "VCF ADSR restart", GROUP_ENV, "check", default=0, cc=33),
 
