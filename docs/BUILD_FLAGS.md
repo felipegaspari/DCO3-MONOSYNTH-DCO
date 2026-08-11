@@ -152,6 +152,22 @@ Derived: `ADSR_BEZIER_PHASE_SCALE_U64` (`1` when shift > 22).
 | `USE_ADC_STACK_VOICES` | commented | Legacy ADC stack voices (GPIO 28) | unused when commented |
 | `USE_ADC_DETUNE` | commented | Legacy ADC detune (GPIO 27) | unused when commented |
 
+**LittleFS flash partition:** presets (`pb00`…`pb63`, 4 records × 598 B per chunk) plus
+calibration files need a filesystem slice. The default
+`rp2040:rp2040:rpipico2:usbstack=tinyusb` FQBN often allocates **no** FS space.
+Compile/upload with an explicit size that includes one, e.g.:
+
+```bash
+arduino-cli compile \
+  --fqbn rp2040:rp2040:rpipico2:usbstack=tinyusb,flash=4194304_524288 \
+  --libraries ./_build_libs \
+  .
+```
+
+(`4194304_524288` = 4 MB flash, 512 KB LittleFS — sized for a full 256-slot bank at
+4 records/file.) Without that, `init_FS()` / preset save fail at runtime. Preset
+protocol: [`PRESET_STORE.md`](PRESET_STORE.md).
+
 Comment-only (not a live define): `ENABLE_PIO_MIDI` — not compiled today. With
 `ENABLE_SUBOSC_ENGINE2`, pio1 SM0 is free for it; without engine2, PIO2 was the reserved
 block (classic sub occupies pio1 SM0). See [`PINOUT.md`](PINOUT.md) / [`PIO_OSCILLATORS.md`](PIO_OSCILLATORS.md) §3.2.
@@ -205,4 +221,6 @@ Headers that only **consume** flags (no new feature `#define`): `voices.h`, `cv_
 | FS cal load | [`globals.h`](../globals.h) `ENABLE_FS_CALIBRATION` |
 | OSC1 debug prints | [`voices.ino`](../voices.ino) `DCO_DEBUG_REPORT` |
 
-After flag changes: clean rebuild; confirm LittleFS amp-comp load; listen low notes + amp plateau; optional profiler dump (cmd **10**) — see [`BENCHMARKING.md`](BENCHMARKING.md).
+After flag changes: clean rebuild with a flash size that includes a LittleFS partition;
+confirm LittleFS amp-comp load and (if using presets) that `pst*` save/load works; listen
+low notes + amp plateau; optional profiler dump (cmd **10**) — see [`BENCHMARKING.md`](BENCHMARKING.md).

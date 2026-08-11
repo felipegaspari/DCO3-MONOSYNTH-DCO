@@ -247,6 +247,7 @@
 #include "cv_out.h"
 
 #include "FS.h"
+#include "preset_store.h"
 
 #include "noteList.h"
 
@@ -267,7 +268,6 @@
 #include "midi_cc_map.h"  // generated; defines midiCcMap[], so include it once, here
 #include "wave_mux.h"
 
-#include "PID.h"
 #include "autotune.h"
 
 
@@ -304,16 +304,13 @@ void setup() {
   // gpio_pull_down(11);
 }
 
-// Core 1 boot: PID, LittleFS cal load, ADSR, amp-comp precompute, PWM/PIO, voices.
-// Clears calibrationFlag so the init_DCO_calibration block below is currently unreachable.
+// Core 1 boot: LittleFS cal load, ADSR, amp-comp precompute, PWM/PIO, voices.
 void setup1() {
 
   sys_clock_hz_refresh();  // Arduino already set clk_sys; cache real Hz for clkdiv
 
   bench_init_core();
   init_micros_timers();
-
-  init_PID();
 
   // Create voiceTables only if the file is missing (before init_FS stubs it).
   // Force overwrite: PARAM_DEBUG_COMMAND 30 / dco_control Calibration tab.
@@ -339,11 +336,6 @@ void setup1() {
 #endif
   dcoNoisePioBegin(pio[NOISE_PIO], NOISE_SM);
   init_voices();
-
-  if (calibrationFlag == true) {
-    init_DCO_calibration();
-    voice_task_autotune(0, ampCompCalibrationVal);
-  }
 }
 
 // Core 0 forever loop: MIDI every iter; Serial2 + USB CDC on 1 ms; ~50 µs LFO1 + LFO2 + drift.
@@ -379,6 +371,8 @@ void __not_in_flash_func(loop)() {
 #ifdef ENABLE_USB_CONTROL
       serial_usb_task();
 #endif
+      // One-shot recall of the last saved/loaded preset once both cores are up.
+      preset_store_boot_task();
     }
     BENCH_END(loop0_serial);
   }

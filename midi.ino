@@ -69,12 +69,19 @@ void handleNoteOff(byte channel, byte pitch, byte velocity) {
   note_off(pitch);
 }
 
-// MIDI CC handler: CC 42 sets pitch-bend range in semitones and updates the Q24
-// multiplier, everything else goes through the generated map in midi_cc_map.h.
+// MIDI CC handler: CC 0/32 latch preset bank, CC 42 sets pitch-bend range,
+// everything else goes through the generated map in midi_cc_map.h.
 void handleControlChange(byte channel, byte number, byte value) {
+  (void)channel;
   // CC 1 (mod wheel) → mod matrix source 11.
   if (number == 1) {
     mod_matrix_set_mod_wheel(value);
+    return;
+  }
+  // CC 0 (Bank Select MSB) / CC 32 (LSB): latch the upper/lower 128-slot bank
+  // for the next Program Change. Nonzero = bank 1 (slots 128..255).
+  if (number == 0 || number == 32) {
+    midiPresetBank = (value != 0) ? 1 : 0;
     return;
   }
   // CC #42 is used to set the pitch bend range in semitones.
@@ -138,8 +145,14 @@ void midi_cc_apply(uint8_t target, int16_t value) {
   }
 }
 
-// MIDI program-change callback (currently unused / empty).
+// MIDI program-change callback → recall preset slot
+// (midiPresetBank * 128 + program), covering 0..255 (preset_store.ino).
 void handleProgramChange(byte channel, byte program) {
+  (void)channel;
+  const uint16_t slot = (uint16_t)midiPresetBank * 128u + (uint16_t)program;
+  if (slot < PRESET_NUM_SLOTS) {
+    preset_store_load((uint8_t)slot);
+  }
 }
 
 // MIDI pitch-bend callback → midi_pitch_bend (offset to 0..16383 style).

@@ -2065,8 +2065,9 @@ void voice_task_autotune(uint8_t taskAutotuneVoiceMode, uint16_t calibrationValu
     note1 = VOICE_NOTES[0] - 12;
   }
 
-  if (taskAutotuneVoiceMode == 1 || taskAutotuneVoiceMode == 4) {
-    freq = PIDOutput;
+  if (taskAutotuneVoiceMode == 4) {
+    // Highest-frequency search drives an explicit frequency instead of a note.
+    freq = calibrationFreqHz;
   } else {
     freq = (float)sNotePitches[note1];
   }
@@ -2128,11 +2129,8 @@ void voice_task_autotune(uint8_t taskAutotuneVoiceMode, uint16_t calibrationValu
 
     switch (taskAutotuneVoiceMode) {
       case 0:
+      case 4:
         write_range_pwm(currentDCO, calibrationValue);
-        break;
-      case 1:
-        write_range_pwm(currentDCO, calibrationValue);
-        pio_sm_exec(pioN, sm1N, pio_encode_jmp(osc_restart_target(currentDCO)));
         break;
       case 2:
         write_range_pwm(currentDCO, chanLevel);
@@ -2140,8 +2138,6 @@ void voice_task_autotune(uint8_t taskAutotuneVoiceMode, uint16_t calibrationValu
       case 3:
         chanLevel = get_chan_level_for_engine(freq, currentDCO);
         write_range_pwm(currentDCO, chanLevel);
-      case 4:
-        write_range_pwm(currentDCO, calibrationValue);
         break;
     }
 

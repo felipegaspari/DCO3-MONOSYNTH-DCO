@@ -26,12 +26,14 @@ Serial1 is DIN MIDI, Serial2 is the Input board — the DCO's only peer link. It
 
 ```bash
 arduino-cli compile \
-  --fqbn rp2040:rp2040:rpipico2:usbstack=tinyusb \
+  --fqbn rp2040:rp2040:rpipico2:usbstack=tinyusb,flash=4194304_524288 \
   --libraries ./_build_libs \
   .
 ```
 
-Main sketch: `DCO.ino`.
+Main sketch: `DCO.ino`. Use a flash size that includes a LittleFS partition (example:
+4 MB flash / 512 KB FS) so MCU presets and calibration files have space —
+[`docs/PRESET_STORE.md`](docs/PRESET_STORE.md), [`docs/BUILD_FLAGS.md`](docs/BUILD_FLAGS.md).
 
 ### Libraries (`_build_libs`)
 
@@ -79,7 +81,9 @@ See `docs/` — especially:
 - [`docs/DISTORTION.md`](docs/DISTORTION.md) — post-LP Drive/Mix distortion stage (hardware idea + CV prototype)
 - [`docs/FILTER_ROUTING.md`](docs/FILTER_ROUTING.md) — SSI2144 → dist → AS3320 multimode concept
 - [`docs/PIO_OSCILLATORS.md`](docs/PIO_OSCILLATORS.md) — PIO programs, state machine topology, period model, sync modes, phase align, sub-osc, and the invariants behind them
-- [`tools/dco_control/`](tools/dco_control/README.md) — Linux bench controller: drive every parameter over USB with no Input board or Screen attached
+- [`docs/PRESET_STORE.md`](docs/PRESET_STORE.md) — MCU 256-slot LittleFS presets (4/file chunks), cal dump/restore, `'B'`/`'C'` bulk, text dump protocol
+- [`docs/README_serial_and_params.md`](docs/README_serial_and_params.md) — slim inner serial / ParamId how-to (incl. preset cmds)
+- [`tools/dco_control/`](tools/dco_control/README.md) — Linux bench controller: parameters, preset browser, MCU sync, cal backup over USB
 - [`docs/MIDI_CC_MAP.md`](docs/MIDI_CC_MAP.md) — MIDI CC implementation chart: the same control surface over 7-bit CC, for a panel app or a DAW (generated, along with the Open Stage Control session in `tools/panels/`)
 - [`docs/MAINBOARD_ABSORPTION.md`](docs/MAINBOARD_ABSORPTION.md) — plan to absorb Mainboard into DCO
 - `AUTOTUNE.md`, `SYSTEM_OVERVIEW.md`, `FILE_INDEX.md` (some docs may still mention DCO4; prefer this README for monosynth facts)

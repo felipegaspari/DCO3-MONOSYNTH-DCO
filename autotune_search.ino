@@ -1,14 +1,26 @@
 #include "include_all.h"
 
+// =============================================================================
+// autotune_search.ino — search-based DCO amplitude-compensation calibration.
+//
+// This file holds the per-note search that builds each oscillator's
+// [frequency -> range PWM] table (calibrate_DCO), the highest/lowest
+// frequency estimators used when the table reaches the top of the PWM range,
+// and the interpolation helpers shared by those routines.
+//
+// Orchestration (DCO_calibration) and the PW center/limit searches live in
+// autotune.ino; the edge-timing measurement core (find_gap) lives there too.
+// =============================================================================
+
 // Compute allowed |gap| (in microseconds) for a given frequency (Hz) and
 // duty-cycle error fraction (e.g. 0.005 = 0.5% duty error).
-static double compute_gap_tolerance_for_freq(double freqHz, double dutyErrorFraction) {
+// From duty_high - 0.5 = gap / (2*T): |gap|max = 2 * epsilon * T.
+double compute_gap_tolerance_for_freq(double freqHz, double dutyErrorFraction) {
   if (freqHz <= 0.0) {
     return 1e6;  // Very loose tolerance if frequency is invalid.
   }
-  double periodUs = 1e6 / freqHz;                         // Wave period in microseconds.
-  double toleranceUs = 2.0 * dutyErrorFraction * periodUs;  // From |gap| <= 2 * ε * T.
-  return toleranceUs;
+  double periodUs = 1e6 / freqHz;
+  return 2.0 * dutyErrorFraction * periodUs;
 }
 
 // Return true if the two values have opposite signs (simple sign change test).
@@ -22,12 +34,8 @@ static bool did_sign_change(float previous, float current) {
 
 // Helper: set the current DCO amplitude, wait for the waveform to settle,
 // and return the measured duty-cycle gap (or timeout sentinel value).
-// This centralizes the "write PWM, delay, measure gap" pattern so that
-// calibrate_DCO() stays focused on the search logic instead of timing details.
 // IMPORTANT: We normalize the sign here so that a *positive* value means
-// "amplitude too low" and a *negative* value means "amplitude too high",
-// matching the legacy behaviour of the old find_gap() implementation even
-// after the hardware polarity handling was refactored.
+// "amplitude too low" and a *negative* value means "amplitude too high".
 static float measure_gap_for_amp(uint16_t ampPwm) {
   voice_task_autotune(0, ampPwm);
   delay(10);
@@ -39,14 +47,13 @@ static float measure_gap_for_amp(uint16_t ampPwm) {
     return kGapTimeoutSentinel;
   }
 
-  // For valid measurements, flip the sign so calibrate_DCO() continues to
-  // move the PWM in the correct direction regardless of the edge polarity
-  // used inside find_gap().
+  // find_gap() returns avgHighUs - avgLowUs; flip the sign so the search
+  // moves the PWM in the correct direction regardless of edge polarity.
   return -gm.value;
 }
 
 // Helper: evaluate neighbour measurements (lower/higher) around the current
-// voltage and update closestToZero / bestAmpComp if any of them are better.
+// PWM and update closestToZero / bestAmpComp if any of them are better.
 // The caller passes in the measurements taken one step below and above the
 // current PWM value; this routine picks the best candidate among those and
 // the current PWM, based purely on closeness of the duty error to zero.
@@ -61,7 +68,6 @@ static void update_best_from_neighbours(
   uint16_t& bestAmpComp,
   uint16_t currentAmpCompCalibrationVal
 ) {
-  // Evaluate stored measurements including the current voltage
   for (int i = 0; i < rangeSamples; i++) {
     if (abs(lowerMeasurements[i]) < abs(closestToZero)) {
       closestToZero = lowerMeasurements[i];
@@ -80,24 +86,12 @@ static void update_best_from_neighbours(
   }
 }
 
-// Helper: update the calibration PWM based on the current error and tolerance.
-// For large errors we step the PWM in units of 2; once we get close to the
-// target (within tolerance * 20) we only step by 1 to avoid overshooting.
-static void step_amp_from_error(float avgValue, double tolerance, uint16_t& currentAmpCompCalibrationVal) {
-  // Adjust the voltage based on the measurement
-  if (abs(avgValue) < tolerance * 20) {
-    if (avgValue > 0) {
-      currentAmpCompCalibrationVal += 1;
-    } else {
-      currentAmpCompCalibrationVal -= 1;
-    }
-  } else {
-    if (avgValue > 0) {
-      currentAmpCompCalibrationVal += 2;
-    } else {
-      currentAmpCompCalibrationVal -= 2;
-    }
-  }
+// Helper: PWM step for the next probe based on the current error.
+// For large errors step by 2; once close to the target (within tolerance * 20)
+// step by 1 to avoid overshooting. Sign follows the error direction.
+static int step_amp_from_error(float avgValue, double tolerance) {
+  int magnitude = (abs(avgValue) < tolerance * 20) ? 1 : 2;
+  return (avgValue > 0) ? magnitude : -magnitude;
 }
 
 // Helper: compute the initial amplitude (range PWM) guess for a given table
@@ -117,7 +111,7 @@ static uint16_t compute_initial_amp_for_note(
       ctx.calibrationData[3],
       ctx.calibrationData[4],
       ctx.calibrationData[5],
-      sNotePitches[ctx.currentNote - 12] * 100
+      note_to_freq(ctx.currentNote) * 100
     );
   } else {
     return quadraticInterpolation(
@@ -127,7 +121,7 @@ static uint16_t compute_initial_amp_for_note(
       ctx.calibrationData[j - 3],
       ctx.calibrationData[j - 2],
       ctx.calibrationData[j - 1],
-      sNotePitches[ctx.currentNote - 12] * 100
+      note_to_freq(ctx.currentNote) * 100
     );
   }
 }
@@ -140,7 +134,7 @@ static void store_note_result(
   uint16_t bestAmpComp,
   float closestToZero
 ) {
-  ctx.calibrationData[j]     = sNotePitches[ctx.currentNote - 12] * 100;
+  ctx.calibrationData[j]     = note_to_freq(ctx.currentNote) * 100;
   ctx.calibrationData[j + 1] = bestAmpComp;
 
   Serial.print("DCO_calibration_current_note ");
@@ -151,76 +145,85 @@ static void store_note_result(
   Serial.println(closestToZero);
 }
 
-// Initialize the global PID controller used by some legacy calibration
-// routines. Newer code relies more on explicit search than on PID_v1.
-void init_PID() {
-  //initialize the variables we're linked to
-  PIDInput = -2000;
-  PIDSetpoint = 0;
-
-  myPID.SetMode(AUTOMATIC);
-}
-
-// LEGACY: Note-by-note DCO calibration loop driven by PID_v1.
-// Superseded by calibrate_DCO() and currently not used in the main flow.
-// Left here for reference and potential future experiments.
-
-// Search highest usable DCO frequency (returns Hz*100). Called from calibrate_DCO().
+// Search the highest usable DCO frequency at full range PWM (returns Hz*100).
+// Called from calibrate_DCO() when the table reaches the top of the PWM range.
+//
+// At full amplitude PWM, a positive normalized duty error ("amplitude too
+// low") means the frequency is too high for the oscillator to reach full
+// amplitude, so we bisect the frequency window downward; a negative error
+// means there is headroom, so we bisect upward.
 float find_highest_freq() {
-
   ampCompCalibrationVal = DIV_COUNTER;
-  PIDInput = 100;
-  myPID.SetOutputLimits(sNotePitches[DCO_calibration_current_note - 12 - calibration_note_interval], sNotePitches[DCO_calibration_current_note - 12 + calibration_note_interval]);
-  myPID.SetTunings(0.01, 1.2, 0.002);
-  myPID.SetSampleTime(5);
 
-  // Initialize to a non-zero value so the loop enters at least once.
-  DCO_calibration_difference = 1000.0f;
+  // Search window: one calibration interval below/above the current note.
+  double fLow  = note_to_freq(DCO_calibration_current_note - calibration_note_interval);
+  double fHigh = note_to_freq(DCO_calibration_current_note + calibration_note_interval);
 
-  while (abs(DCO_calibration_difference) > 0.5) {
+  const double kDutyGapToleranceUs = 0.5;  // same acceptance as the legacy PID loop
+  const int    kMaxIterations      = 24;   // bisection resolution guard
+
+  float bestFreq   = (float)fLow;
+  float bestAbsGap = 1e9f;
+  bool  sawSignal  = false;
+
+  for (int iter = 0; iter < kMaxIterations; ++iter) {
+    double fMid = 0.5 * (fLow + fHigh);
+    calibrationFreqHz = (float)fMid;
     voice_task_autotune(4, DIV_COUNTER);
     delay(4);
 
-    // Use the same structured gap measurement and sign normalization that the
-    // main calibrate_DCO() path uses, so this function is not sensitive to
-    // hardware polarity changes inside find_gap().
     GapMeasurement gm = measure_gap(0);
     if (gm.timedOut) {
-      DCO_calibration_difference = kGapTimeoutSentinel;
-    } else {
-      // Flip sign so that a positive value still means "too low" and negative
-      // means "too high", matching the legacy behaviour.
-      DCO_calibration_difference = -gm.value;
+      // No usable signal: the amplitude has collapsed below the comparator
+      // threshold, which happens past the top frequency — search lower.
+      fHigh = fMid;
+      continue;
     }
+    sawSignal = true;
 
-    PIDInput = 0 - (double)DCO_calibration_difference;
+    float diff = -gm.value;  // positive => amplitude too low => freq too high
 
-    myPID.Compute();
+    if (fabsf(diff) < bestAbsGap) {
+      bestAbsGap = fabsf(diff);
+      bestFreq   = (float)fMid;
+    }
 
     if (autotuneDebug >= 1) {
-      Serial.println((String) "Pid output: " + PIDOutput + (String) " Pid gap: " + DCO_calibration_difference);
+      Serial.println((String)"[HIGHEST_FREQ] f=" + fMid + (String)" gap=" + diff);
+    }
+
+    if (fabsf(diff) <= kDutyGapToleranceUs) {
+      break;
+    }
+    if (diff > 0) {
+      fHigh = fMid;
+    } else {
+      fLow = fMid;
     }
   }
-  Serial.println((String) "Highest freq found: " + PIDOutput);
 
-  //find highest note
-  for (int i = 0; i < sizeof(sNotePitches); i++) {
-    if (PIDOutput > sNotePitches[i] && PIDOutput < sNotePitches[i + 1]) {
-      highestNoteOSC[currentDCO] = i;
-      Serial.println((String) "Highest note found: " + i + (String) " - Note freq: " + sNotePitches[i]);
+  if (!sawSignal) {
+    Serial.println((String)"[HIGHEST_FREQ] no valid signal in search window; using " + bestFreq);
+  }
+  Serial.println((String)"Highest freq found: " + bestFreq);
+
+  // Report the nearest note at/below the found frequency.
+  constexpr int kNoteCount = (int)(sizeof(sNotePitches) / sizeof(sNotePitches[0]));
+  for (int i = 0; i < kNoteCount - 1; i++) {
+    if (bestFreq >= sNotePitches[i] && bestFreq < sNotePitches[i + 1]) {
+      Serial.println((String)"Highest note found: " + i + (String)" - Note freq: " + sNotePitches[i]);
       break;
     }
   }
 
-  return PIDOutput * 100;
+  return bestFreq * 100.0f;
 }
 
 // Estimate the lowest reachable frequency for the current DCO using the
 // latest [freq -> PWM] calibration data and a polynomial fit, assuming
 // an amp compensation (range PWM) of 0. This is conceptually symmetric
-// to find_highest_freq(), but instead of running a full PID loop we
-// derive the starting point from the same interpolation strategy used
-// in calibrate_DCO().
+// to find_highest_freq(), but instead of a live search we derive the
+// estimate from the same interpolation strategy used in calibrate_DCO().
 //
 // Return value: estimated lowest frequency * 100 (same units as
 // calibrationData[] entries and find_highest_freq()).
@@ -291,18 +294,20 @@ float find_lowest_freq() {
 // is tolerated before the search stops for each note.
 void calibrate_DCO(DCOCalibrationContext& ctx, double dutyErrorFraction) {
 
-  double tolerance;      // Allowed absolute duty error (in microseconds) for a given note.
-  uint16_t minAmpComp;   // Lower bound for the PWM search around the initial guess.
-  uint16_t maxAmpComp;   // Upper bound for the PWM search around the initial guess.
-  int rangeSamples = 2;  // Number of neighbour voltages to probe around a sign change.
+  const int rangeSamples = 2;  // Number of neighbour voltages to probe around a sign change.
   const int numPresetVoltages = chanLevelVoiceDataSize;  // Size of the [freq, pwm] table.
 
+  // Per-note search guards: a dead oscillator or an unreachable tolerance
+  // must not hang the whole calibration run.
+  const int           kMaxSearchIterations   = 300;
+  const unsigned long kMaxNoteSearchMs       = 30000;
+  const int           kMaxConsecutiveTimeouts = 20;
+
   for (int j = 4; j < numPresetVoltages; j += 2) {  // Start from the 3rd preset voltage
-    uint16_t currentAmpCompCalibrationVal;
 
     ctx.currentNote = DCO_calibration_start_note + (calibration_note_interval * (j - 4) / 2);
     VOICE_NOTES[0] = ctx.currentNote;
-    currentAmpCompCalibrationVal = compute_initial_amp_for_note(ctx, j);
+    uint16_t currentAmpCompCalibrationVal = compute_initial_amp_for_note(ctx, j);
 
     if (currentAmpCompCalibrationVal > DIV_COUNTER * 0.98) {
       // When we hit the top of the usable PWM range, stop the table here.
@@ -327,23 +332,22 @@ void calibrate_DCO(DCOCalibrationContext& ctx, double dutyErrorFraction) {
       break;
     }
 
-    uint16_t minAmpComp = currentAmpCompCalibrationVal * 0.8;  // Lower Limit for this note.
-    uint16_t maxAmpComp = currentAmpCompCalibrationVal * 1.3;  // Upper Limit for this note.
+    const uint16_t minAmpComp = currentAmpCompCalibrationVal * 0.8;  // Lower limit for this note.
+    const uint16_t maxAmpComp = currentAmpCompCalibrationVal * 1.3;  // Upper limit for this note.
 
-    double freqHz = sNotePitches[VOICE_NOTES[0] - 12];
-    tolerance = compute_gap_tolerance_for_freq(freqHz, dutyErrorFraction);
+    const double freqHz = note_to_freq(VOICE_NOTES[0]);
+    double tolerance = compute_gap_tolerance_for_freq(freqHz, dutyErrorFraction);
 
     // For debugging, report the effective duty-cycle tolerance in percent.
-    double periodUs = (freqHz > 0.0) ? (1000000.0 / freqHz) : 0.0;
+    const double periodUs = (freqHz > 0.0) ? (1000000.0 / freqHz) : 0.0;
     double toleranceDutyPercent = 0.0;
     if (periodUs > 0.0) {
-      double tolDutyFrac = tolerance / (2.0 * periodUs);
-      toleranceDutyPercent = tolDutyFrac * 100.0;
+      toleranceDutyPercent = (tolerance / (2.0 * periodUs)) * 100.0;
     }
 
     Serial.println((String) "Current DCO: " + ctx.dcoIndex);
     Serial.println((String) "Calibration note: " + VOICE_NOTES[0]);
-    Serial.println((String) "Calibration note freq: " + sNotePitches[VOICE_NOTES[0] - 12]);
+    Serial.println((String) "Calibration note freq: " + freqHz);
     Serial.println((String) "Calibration note amplitude: " + currentAmpCompCalibrationVal);
     Serial.println((String) "Tolerance (us): " + tolerance);
     Serial.println((String) "Tolerance duty approx (%): " + toleranceDutyPercent);
@@ -354,8 +358,8 @@ void calibrate_DCO(DCOCalibrationContext& ctx, double dutyErrorFraction) {
     delay(10);
 
     uint16_t bestAmpComp = currentAmpCompCalibrationVal;  // Best PWM found so far for this note.
-    float closestToZero = 50000;  // Smallest absolute duty error seen so far.
-    float previousAvgValue = 0.0; // Duty error from the previous iteration (for sign-change detection).
+    float closestToZero = 50000;   // Smallest absolute duty error seen so far.
+    float previousAvgValue = 0.0;  // Duty error from the previous iteration (for sign-change detection).
 
     float lowerMeasurements[rangeSamples];   // Duty errors measured at lower neighbour PWMs.
     float higherMeasurements[rangeSamples];  // Duty errors measured at higher neighbour PWMs.
@@ -363,8 +367,19 @@ void calibrate_DCO(DCOCalibrationContext& ctx, double dutyErrorFraction) {
     uint16_t higherVoltages[rangeSamples];   // PWM values used for higherMeasurements[].
 
     int flipCounter = 0;  // Count of successive sign changes; used to relax tolerance if the search oscillates.
+    int consecutiveTimeouts = 0;
+    unsigned long noteSearchStartMs = millis();
 
-    while (true) {
+    for (int iteration = 0;; ++iteration) {
+      if (iteration >= kMaxSearchIterations ||
+          (millis() - noteSearchStartMs) > kMaxNoteSearchMs) {
+        Serial.println((String)"[DCO_AMP_GUARD] note=" + ctx.currentNote +
+                       (String)" DCO=" + ctx.dcoIndex +
+                       (String)" search guard tripped after " + iteration +
+                       (String)" iterations; keeping best AMP=" + bestAmpComp);
+        break;
+      }
+
       float avgValue = measure_gap_for_amp(currentAmpCompCalibrationVal);
 
       // Optional debug: report current duty and tolerance when enabled.
@@ -377,34 +392,50 @@ void calibrate_DCO(DCOCalibrationContext& ctx, double dutyErrorFraction) {
                          (String)" gap=TIMEOUT" +
                          (String)" duty=NA target=50% tol≈" + toleranceDutyPercent + "%");
         } else {
-          // avgValue is the same DCO_calibration_difference used elsewhere:
-          // positive => high segment longer (duty > 50%), negative => low longer.
+          // avgValue sign convention: positive => amplitude too low.
           double dutyErrorFrac = (double)avgValue / (2.0 * periodUs);
           double dutyPercent   = (0.5 + dutyErrorFrac) * 100.0;
-        Serial.println((String)"[DCO_AMP_SCAN] note=" + ctx.currentNote +
-                       (String)" DCO=" + ctx.dcoIndex +
-                       (String)" AMP=" + currentAmpCompCalibrationVal +
-                       (String)" gap=" + avgValue +
-                       (String)"us duty=" + dutyPercent +
-                       (String)"% target=50% tol≈" + toleranceDutyPercent + "%");
+          Serial.println((String)"[DCO_AMP_SCAN] note=" + ctx.currentNote +
+                         (String)" DCO=" + ctx.dcoIndex +
+                         (String)" AMP=" + currentAmpCompCalibrationVal +
+                         (String)" gap=" + avgValue +
+                         (String)"us duty=" + dutyPercent +
+                         (String)"% target=50% tol≈" + toleranceDutyPercent + "%");
         }
       }
 
-      // Update best candidate only if the measurement is valid (not a timeout)
-      // and closer to zero than what we've seen before.
-      if (avgValue != kGapTimeoutSentinel && abs(avgValue) < abs(closestToZero)) {
+      // Timeout: no usable signal at this PWM. The most common cause is an
+      // amplitude too low for the calibration comparator, so nudge the PWM up
+      // one step and measure again. previousAvgValue is deliberately left
+      // untouched so the sentinel cannot fake a sign change, and the sentinel
+      // is never allowed into the best-candidate tracking below.
+      if (avgValue == kGapTimeoutSentinel) {
+        ++consecutiveTimeouts;
+        if (consecutiveTimeouts >= kMaxConsecutiveTimeouts) {
+          Serial.println((String)"[DCO_AMP_GUARD] note=" + ctx.currentNote +
+                         (String)" DCO=" + ctx.dcoIndex +
+                         (String)" too many consecutive timeouts; keeping best AMP=" + bestAmpComp);
+          break;
+        }
+        if (currentAmpCompCalibrationVal < maxAmpComp) {
+          currentAmpCompCalibrationVal += 1;
+        }
+        continue;
+      }
+      consecutiveTimeouts = 0;
+
+      // Update best candidate if this measurement is closer to zero.
+      if (abs(avgValue) < abs(closestToZero)) {
         closestToZero = avgValue;
         bestAmpComp = currentAmpCompCalibrationVal;
-      } else {
-        avgValue == 0;
       }
 
       // Detect sign change
       if (did_sign_change(previousAvgValue, avgValue)) {
         // Store measurements around the current voltage
         for (int i = 0; i < rangeSamples; i++) {
-          float lowerVoltage = currentAmpCompCalibrationVal - (i + 1);
-          float higherVoltage = currentAmpCompCalibrationVal + (i + 1);
+          uint16_t lowerVoltage = currentAmpCompCalibrationVal - (i + 1);
+          uint16_t higherVoltage = currentAmpCompCalibrationVal + (i + 1);
 
           lowerMeasurements[i] = measure_gap_for_amp(lowerVoltage);
           lowerVoltages[i] = lowerVoltage;
@@ -439,12 +470,23 @@ void calibrate_DCO(DCOCalibrationContext& ctx, double dutyErrorFraction) {
         }
       }
 
-      step_amp_from_error(avgValue, tolerance, currentAmpCompCalibrationVal);
+      // Step the PWM toward the target and enforce the allowed search window.
+      // Stepping is done in int32 so it cannot wrap below zero.
+      int32_t nextAmp = (int32_t)currentAmpCompCalibrationVal + step_amp_from_error(avgValue, tolerance);
+      if (nextAmp < (int32_t)minAmpComp) nextAmp = (int32_t)minAmpComp;
+      if (nextAmp > (int32_t)maxAmpComp) nextAmp = (int32_t)maxAmpComp;
 
-      // Ensure the voltage stays within the allowed range
-      if (currentAmpCompCalibrationVal < minAmpComp || currentAmpCompCalibrationVal > maxAmpComp) {
-        Serial.println((String) "Calibration voltage out of range: " + currentAmpCompCalibrationVal);
+      if ((uint16_t)nextAmp == currentAmpCompCalibrationVal &&
+          (nextAmp == (int32_t)minAmpComp || nextAmp == (int32_t)maxAmpComp)) {
+        // Stuck at a search bound with the error still pushing outward:
+        // the target is not reachable inside the window; keep the best found.
+        Serial.println((String)"[DCO_AMP_GUARD] note=" + ctx.currentNote +
+                       (String)" DCO=" + ctx.dcoIndex +
+                       (String)" stuck at bound AMP=" + currentAmpCompCalibrationVal +
+                       (String)"; keeping best AMP=" + bestAmpComp);
+        break;
       }
+      currentAmpCompCalibrationVal = (uint16_t)nextAmp;
 
       previousAvgValue = avgValue;
     }
@@ -465,8 +507,6 @@ float quadraticInterpolation(float x0, float y0, float x1, float y1, float x2, f
   return a * x * x + b * x + c;
 }
 
-// Exponential interpolate between (x0,y0)-(x1,y1). Currently unused.
-
 // Log interpolate between two points → uint16. Used by compute_initial_amp_for_note().
 uint16_t logarithmicInterpolation(float x0, float y0, float x1, float y1, float x) {
   // Ensure x0 and x1 are not zero or negative to avoid log(0) or log of negative number
@@ -483,10 +523,6 @@ uint16_t logarithmicInterpolation(float x0, float y0, float x1, float y1, float 
 
   return (uint16_t)round(y);
 }
-
-// Log interpolate (float). Currently unused.
-
-// Log interpolate (double). Currently unused.
 
 // Linear interpolate between two points. Used by find_lowest_freq().
 float linearInterpolation(float x0, float y0, float x1, float y1, float x) {
@@ -509,15 +545,15 @@ float linearInterpolation(float x0, float y0, float x1, float y1, float x) {
 
 // Solve exponential interpolation for y at x (log-space lerp). Used by initMultiplierTables().
 double expInterpolationSolveY(double x, double x0, double x1, double y0, double y1) {
-    if (x0 <= 0 || x1 <= 0) {
-        // Handle error: x0 and x1 must be greater than 0 for exponential interpolation
-        return NAN;
-    }
+  if (x0 <= 0 || x1 <= 0) {
+    // Handle error: x0 and x1 must be greater than 0 for exponential interpolation
+    return NAN;
+  }
 
-    double log_y0 = log(y0);
-    double log_y1 = log(y1);
+  double log_y0 = log(y0);
+  double log_y1 = log(y1);
 
-    double log_y = log_y0 + (log_y1 - log_y0) * (x - x0) / (x1 - x0);
+  double log_y = log_y0 + (log_y1 - log_y0) * (x - x0) / (x1 - x0);
 
-    return exp(log_y);
+  return exp(log_y);
 }

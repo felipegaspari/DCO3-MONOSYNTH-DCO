@@ -1,6 +1,6 @@
 # DCO3-MONOSYNTH System Overview
 
-DCO3-MONOSYNTH is a **fully digitally controlled analog monosynth**, forked from DCO4: digital control and calibration drive analog DCO / filter / VCA hardware. The goal includes patch saving for all parameters.
+DCO3-MONOSYNTH is a **fully digitally controlled analog monosynth**, forked from DCO4: digital control and calibration drive analog DCO / filter / VCA hardware. The DCO board stores **128 patch slots + calibration tables** in LittleFS (MIDI Program Change / boot recall / USB dump-restore via [`tools/dco_control`](../tools/dco_control/README.md) — [`PRESET_STORE.md`](PRESET_STORE.md)).
 
 The shipping instrument is **three firmwares** (Mainboard absorbed into DCO). Board-specific details live in each board folder / docs.
 
@@ -16,9 +16,9 @@ The shipping instrument is **three firmwares** (Mainboard absorbed into DCO). Bo
 
 | Board | Repo / folder | MCU | Owns |
 |-------|---------------|-----|------|
-| **DCO (voice + hub)** | `DCO/` | RP2350A or B | MIDI, 1×3 PIO DCOs, EnvDCO/VCA/VCF, LFOs, cal, LittleFS; Input UART (panel + gap); Cut/Res/VCA CV; osc wave/level. Full dist/mode/FX **code** retained for solo-B |
+| **DCO (voice + hub)** | `DCO/` | RP2350A or B | MIDI, 1×3 PIO DCOs, EnvDCO/VCA/VCF, LFOs, cal, LittleFS presets + cal banks; Input UART (panel + gap); Cut/Res/VCA CV; osc wave/level. Full dist/mode/FX **code** retained for solo-B |
 | **Voice aux** | [`VOICE-AUX/`](../../VOICE-AUX/) | RP2040 | RX-only on Input TX; AS3320 mode, dist Drive/Mix, FX stubs — [`DUAL_MCU.md`](DUAL_MCU.md) |
-| **Input controller** | `INPUT-CONTROLLER/` | RP2040 | Front panel, presets; UART to voice (fanout to DCO ± aux); relays gap `'x'` 154 → Screen |
+| **Input controller** | `INPUT-CONTROLLER/` | RP2040 | Front panel; RAM-only 256-slot preset name cache (DCO's LittleFS is the store of record — [`PRESET_STORE.md`](PRESET_STORE.md)); UART to voice (fanout to DCO ± aux); relays gap `'x'` 154 → Screen |
 | **Screen controller** | `SCREEN-CONTROLLER/` | RP2040 | ILI9488 + LVGL; UI from Input; gap relayed by Input |
 | ~~Mainboard~~ | [`_archived/Mainboard/`](../../_archived/Mainboard/) | STM32 | *Archived* — no firmware path remains on any board |
 
@@ -45,8 +45,8 @@ flowchart LR
 | Link | Baud | Peers | Role |
 |------|------|-------|------|
 | DCO `Serial1` | 31250 | DIN MIDI | MIDI in (RX1 / TX0) — interim HW; PIO MIDI later |
-| DCO `Serial2` **RX GP21** | 2.5M | Input `Serial1` **TX GP0** | Panel in (slim `'a'`–`'d'`, `'p'`, `'q'`; LE, no finish). Input firmware still sends the old BE format until updated. Same TX may fan out to RP2040 aux RX ([`DUAL_MCU.md`](DUAL_MCU.md)) |
-| DCO `Serial2` **TX GP20** | 2.5M | Input `Serial1` **RX GP1** | Gap/offset `'x'` 154 / 155 + persistable `'p'` mirror out (DCO only — aux never TX) |
+| DCO `Serial2` **RX GP21** | 2.5M | Input `Serial1` **TX GP0** | Panel in (slim `'a'`–`'d'`, `'p'`, `'q'`; LE, no finish), plus Input's `'N'` preset-directory request. USB CDC also accepts `'B'`/`'C'` bulk restore for presets/cal. Input firmware still sends the old BE format until updated. Same TX may fan out to RP2040 aux RX ([`DUAL_MCU.md`](DUAL_MCU.md)) |
+| DCO `Serial2` **TX GP20** | 2.5M | Input `Serial1` **RX GP1** | Gap/offset `'x'` 154 / 155 + persistable `'p'` mirror out, plus `'O'` preset directory entries and `'L'` load notices (DCO only — aux never TX) |
 | Input `Serial2` **TX GP4** | 2.5M | Screen `Serial1` **RX GP13** | UI frames / preset names + forwarded gap `'x'` 154 |
 
 On a Pico the silkscreen `UART0` is GP0/GP1 and is Arduino-Pico's `Serial1`; `UART1` is `Serial2`.
@@ -67,4 +67,4 @@ Note edges never leave the DCO. `noteStart[]` / `noteEnd[]` drive EnvDCO/EnvVCA/
 
 The serial topology is no longer switchable: Serial1 is DIN MIDI, Serial2 is the Input link. The old `ENABLE_INPUT_UART`, `ENABLE_SCREEN_UART` and `ENABLE_LEGACY_MAINBOARD_LINK` flags were removed with the Mainboard and SerialPIO paths.
 
-Pin map: [`PINOUT.md`](PINOUT.md). Mod matrix: [`MOD_MATRIX.md`](MOD_MATRIX.md). Wave mux: [`WAVE_MUX.md`](WAVE_MUX.md).
+Pin map: [`PINOUT.md`](PINOUT.md). Mod matrix: [`MOD_MATRIX.md`](MOD_MATRIX.md). Wave mux: [`WAVE_MUX.md`](WAVE_MUX.md). MCU presets / cal dump: [`PRESET_STORE.md`](PRESET_STORE.md).

@@ -38,5 +38,8 @@ void generate_fake_calibration_data(uint8_t osc, uint32_t* out);
 // Seed LittleFS with fake amp-comp + PW defaults.
 // force=false: only if voiceTables file is missing. force=true: overwrite + precompute (cmd 30).
 void seed_fake_calibration_tables(bool force = false);
+// Truncate/create a LittleFS file and write a full bank in one shot.
+// Shared with the bulk-restore path in preset_store.ino.
+void write_fs_bank(const char* name, const uint8_t* data, size_t size);
 
 #endif

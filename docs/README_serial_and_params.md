@@ -1,78 +1,67 @@
-## Serial & Parameter Protocol – Usage Guide
+## Serial & Parameter Protocol – DCO (DCO3-MONOSYNTH)
 
-Shared **inner** serial + parameter infrastructure for DCO4-family MCUs. On this board
-(DCO3-MONOSYNTH) the only peer UART is Serial2 ↔ Input; USB CDC (`ENABLE_USB_CONTROL`)
-speaks the same inner frames for [`tools/dco_control`](../tools/dco_control/README.md).
+The wire format, the command table, the parser and the `ParamId` enum are shared
+by every board and documented once in
+[`DCO-PROTOCOL/README.md`](../../DCO-PROTOCOL/README.md). The headers come from
+that library through `_build_libs/DCO-PROTOCOL`; there is no copy in this sketch
+folder any more.
 
----
-
-## 1. Headers
-
-| Header | Role |
-|--------|------|
-| `params_def.h` | Canonical `enum ParamId : uint16_t` (wire id is still `uint8`) |
-| `param_router.h` | `ParamDescriptorT` table + O(1) jump dispatch |
-| `serial_input_protocol.h` | Command bytes + payload sizes (`'a'`–`'d'`, `'p'`, `'q'`, `'x'`) |
-| `serial_param_protocol.h` | LE encode/decode for `'p'` / `'w'` / `'x'` |
-| `serial_frame.h` | Buffer COBS encode/decode + `serial_frame_stuff` / `unstuff` / `write()`. Default RAW; `#define SERIAL_FRAMING_COBS` wraps `COBS(inner)+0x00` |
-| `serial_parser.h` | Non-blocking parser: 256-entry cmd LUT, idle timeout (`SERIAL_FRAME_TIMEOUT_US` = 500 µs), drain budget 64. RAW fixed-length or COBS accumulate-until-`0x00` |
-| `serial_protocol.h` | Compatibility stub → `serial_input_protocol.h` (Mainboard `'n'`/`'o'`/`'s'` retired) |
-
-**USB bench link:** `serial_usb_task()` uses a second `SerialParserContext` and the same LUT as Serial2. Only host → DCO is framed; DCO → host is plain debug text. Panel Serial2 and USB CDC drain on Core 0 `timer1msFlag` (~1 ms). USB/DIN MIDI still runs every `loop()`. CDC drain is skipped when the host has not opened `Serial`.
-
-**MIDI CC:** `midi_cc_apply()` writes ADSR/filter block globals directly (`CC_LOCAL_*`). Everything else, including `PARAM_PW_VALUE` and `PARAM_ADSR1_TO_VCA`, goes through `update_parameters()`. Persistable ParamId CCs also `serial_echo_persistable_param16()` so Input LittleFS save matches what you hear. `'a'`–`'d'` domains are not mirrored.
+This page covers only what is specific to the DCO.
 
 ---
 
-## 2. Inner frames (handlers always see this)
+## Links
 
-Little-endian multi-byte fields. No finish byte. `0x00` is reserved (COBS delimiter) and is never a command.
+The only peer UART is Serial2 ↔ Input. USB CDC (`ENABLE_USB_CONTROL`) speaks the
+same inner frames for [`DCO-CONTROL-PANEL`](../../DCO-CONTROL-PANEL/README.md).
 
-| Cmd | Payload | Meaning |
-|-----|---------|---------|
-| `'a'`/`'b'`/`'c'` | 8 | ADSR A,D,S,R as `uint16`. A/D/R exp-mapped 0..25000; S linear. Direct globals + dirty flags — **not** `update_parameters` |
-| `'d'` | 8 | `CUTOFF`, `RESONANCE`, `ADSR2toVCF`, `LFO2toVCF` + scale bake |
-| `'p'` | 3 | `[id:u8][value:i16]` → `update_parameters`. Also DCO→Input persistable mirror (USB/MIDI only; never panel ingress) |
-| `'q'` | 8 | Preset name, 8 ASCII chars |
-| `'x'` | 5 | DCO→Input `[id:u8][value:u32 LE]` (gap 154 / cal 155); `serial_frame_write` |
+`serial_usb_task()` uses a second `SerialParserContext` with the same LUT as
+Serial2. Only host → DCO is framed; DCO → host is plain debug text, including the
+structured `[dump]` / `[pdir]` / `[preset]` / `[bulk]` lines the preset store
+emits. Panel Serial2 and USB CDC drain on Core 0 `timer1msFlag` (~1 ms), while
+USB/DIN MIDI runs every `loop()`. The CDC drain is skipped when the host has not
+opened `Serial`.
 
-On-wire **default** = inner (RAW). **`#define SERIAL_FRAMING_COBS`:** `COBS(cmd+payload) + 0x00`. Handlers still see inner only. Host A/B: `dco_control --cobs` or `DCO_SERIAL_COBS=1` (must match firmware or controls look ignored). Codec is buffer-in/buffer-out so a later SPI link can reuse `serial_frame_unstuff` after reading until `0x00`.
+`SERIAL_INNER_MAX_PAYLOAD` is **36** here (set in `Serial.h`), sized for the `'B'`
+bulk chunk; Input and Screen use 17. Screen-only commands (`'w'`, `'y'`, `'s'`
+and the 17-byte `'q'` scroll) never reach this board. Uppercase `'B'`/`'C'` are
+the bulk restore pair and are distinct from lowercase `'c'`, the EnvDCO ADSR
+block. The former `'e'`/`'f'` commands are now `'p'` ids 222 and 210.
 
-**Input and Screen speak the same slim inner protocol.** Flash all three boards together. `SERIAL_INNER_MAX_PAYLOAD` defaults to 8 (DCO); Input/Screen override to 17 for Screen `'q'` scroll. Screen-only cmds (`'w'`/`'y'`/`'s'`/`'c'`, 17-byte `'q'`) never reach DCO. Former `'e'`/`'f'` are `'p'` ids 222 / 210. `SERIAL_FRAMING_COBS` must match on all three (commented = RAW).
+## Board-specific frame handling
 
----
+- `'a'`/`'b'`/`'c'`/`'d'` write the ADSR and filter block globals directly and
+  set dirty flags — they do **not** go through `update_parameters()`.
+- `'p'` is both panel ingress and the DCO→Input persistable mirror (the mirror is
+  sent for USB/MIDI edits only, never for panel ingress).
+- `'q'` also stages the name used by `PARAM_PRESET_SAVE`.
 
-## 3. Adding a parameter (`ParamId`)
+## MIDI CC
 
-1. Append a new id in `params_def.h` (do not renumber; stay ≤ 255 on the wire).
-2. Implement `apply_param_*` and add one row to `paramTable[]` in `params.ino`.
-3. Call `init_param_router()` at boot (already in `setup()`).
-4. Send `'p'` + id + i16 LE. Host: one `Param` row in `tools/dco_control/params.py`.
+`midi_cc_apply()` writes the ADSR/filter block globals directly (`CC_LOCAL_*`).
+Everything else, including `PARAM_PW_VALUE` and `PARAM_ADSR1_TO_VCA`, goes
+through `update_parameters()`. Persistable ParamId CCs also call
+`serial_echo_persistable_param16()` so a saved preset matches what you hear. The
+`'a'`–`'d'` domains are not mirrored. MIDI Program Change recalls a preset slot
+(`midiPresetBank * 128 + program`; CC 0/32 select the bank).
 
-No new serial command unless it is a new **1 ms analog block**.
+## Preset / calibration ParamIds (DCO-local)
 
----
+| Id | Name | Value |
+|----|------|-------|
+| 170 | `PARAM_PRESET_SAVE` | slot 0..255 — save live state to LittleFS |
+| 171 | `PARAM_PRESET_LOAD` | slot 0..255 — recall (same as MIDI PC + bank) |
+| 172 | `PARAM_PRESET_DUMP` | −1 = `[pdir]` listing; 0..255 = slot record hex dump |
+| 173 | `PARAM_CAL_DUMP` | 0/−1 = all cal tables; 1..5 = one table |
 
-## 4. Adding a serial command (rare)
+These are deliberately off the MIDI CC map (filesystem access and long dumps).
+See [`PRESET_STORE.md`](PRESET_STORE.md) and the host tool at
+[`DCO-CONTROL-PANEL`](../../DCO-CONTROL-PANEL/README.md).
 
-1. Add the cmd + payload length to `serial_input_protocol.h` (`serial_input_payload_len`).
-2. Implement `on_frame` and add a `SerialCommandDef` row in `Serial.ino`.
-3. Keep `0x00` unused. Prefer LE. Send via `serial_frame_write()`, not ad-hoc UART bytes.
+## Adding a parameter here
 
----
-
-## 5. Parser notes
-
-- O(1) lookup: `serial_command_table_init()` fills `payload_len[256]` / `on_frame[256]`.
-- Timeout (`SERIAL_FRAME_TIMEOUT_US` = 500 µs) runs only when mid-frame **and** the stream is idle — no `micros()` per byte. COBS: mid-frame means stuffed bytes received, delimiter not yet seen.
-- RAW: cmd LUT + fixed payload. COBS: accumulate until `0x00`, decode, unpack, then LUT length check.
-- Drain snapshots `available()` once, then `read()`s up to `SERIAL_DRAIN_BYTE_BUDGET` (64) so one 1 ms Input burst (incl. COBS ~11 B/block) finishes in a single tick.
-
----
-
-## 6. New MCU checklist
-
-1. Copy `params_def.h`, `param_router.h`, `serial_input_protocol.h`, `serial_param_protocol.h`, `serial_frame.h`, `serial_parser.h`.
-2. `paramTable[]` + `init_param_router()` + `update_parameters(uint16_t, int16_t)`.
-3. Per UART: `SerialCommandDef[]` → LUT, `serial_parser_drain()`, `serial_frame_write()` for TX.
-4. Keep ParamIds and inner layouts identical across MCUs.
+The generic steps are in the [shared
+guide](../../DCO-PROTOCOL/README.md#adding-a-parameter). On this board, after
+adding the id you implement `apply_param_*`, add a row to `paramTable[]` in
+`params.ino`, and rely on `init_param_router()` already being called from
+`setup()`.

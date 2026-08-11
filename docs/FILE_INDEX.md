@@ -2,12 +2,20 @@
 
 Purpose of **every file**, and for each source function: **what it does**, **who calls it**, and **when**.
 
+> `params_def.h`, `param_router.h`, `serial_input_protocol.h`,
+> `serial_param_protocol.h`, `serial_frame.h` and `serial_parser.h` are no longer
+> files in this folder. They come from the shared
+> [`DCO-PROTOCOL`](../../DCO-PROTOCOL/README.md) library, symlinked in as
+> `_build_libs/DCO-PROTOCOL`. Their entries below still describe the code this
+> board compiles; edit them in the library, once, for every board.
+
 - Deep narrative: [`REFERENCE_AI.md`](REFERENCE_AI.md)
 - Build flags catalog: [`BUILD_FLAGS.md`](BUILD_FLAGS.md)
 - Engine float/fixed math: [`ENGINE_OPTIONS.md`](ENGINE_OPTIONS.md)
 - Hot-path profiling: [`BENCHMARKING.md`](BENCHMARKING.md)
 - SRAM / heap / stack: [`MEMORY.md`](MEMORY.md)
 - Character / noise jitter: [`CHARACTER.md`](CHARACTER.md)
+- MCU presets / cal dump: [`PRESET_STORE.md`](PRESET_STORE.md)
 - CV mod depth scales: [`CV_MOD_SCALES.md`](CV_MOD_SCALES.md)
 - LFO Q15 bus / pitch depth scales: [`LFO.md`](LFO.md)
 - Repo entry / doc index: [`../README.md`](../README.md)
@@ -29,13 +37,16 @@ flowchart TD
   setup0 --> initSerial["init_serial / init_param_router / init_midi / init_LFOs"]
   setup1 --> initCore1["seed_fake_if_missing / init_FS / init_ADSR / init_pwm / init_pio / init_range_pio_dither / init_voices"]
 
-  loop0 --> midiRead["MIDI_*.read every loop → handle* → note_on/off"]
+  loop0 --> midiRead["MIDI_*.read every loop → handle* → note_on/off / PC→preset_load"]
   loop0 --> serialTask["serial_panel/USB on timer1msFlag"]
+  loop0 --> bootPreset["preset_store_boot_task once ~1.5s"]
   loop0 --> lfo["LFO1/LFO2 ~50µs; drift ~51µs"]
   lfo --> fifo["FIFO Q24 detune → Core1"]
 
-  serialTask --> updParam["update_parameters → apply_param_*"]
+  serialTask --> updParam["update_parameters → shadow + apply_param_*"]
   updParam -->|calibrationFlag| calBranch
+  serialTask --> bulk["'B'/'C' → preset_bulk_*"]
+  bootPreset --> pstLoad["preset_store_load"]
 
   loop1 --> millis["microsTimer2()"]
   loop1 --> calBranch{"calibrationFlag?"}
@@ -68,10 +79,10 @@ Main sketch: dual-core setup/loops, USB init (product DCO3-MONO), engine flags (
 - `setup()` — Core 0 init: serial, MIDI, LFOs, pins, USB strings, cal pin.
   - **Called from:** Arduino framework (Core 0).
   - **When:** Boot once.
-- `setup1()` — Core 1 init: PID, `seed_fake_calibration_tables(false)` if `voiceTables` missing, FS, ADSR, `mod_matrix_init`, amp-comp precompute, PWM, PIO, optional `init_range_pio_dither`, voices; clears cal flags.
+- `setup1()` — Core 1 init: `seed_fake_calibration_tables(false)` if `voiceTables` missing, FS, ADSR, `mod_matrix_init`, amp-comp precompute, PWM, PIO, optional `init_range_pio_dither`, voices; clears cal flags.
   - **Called from:** Arduino framework (Core 1).
-  - **When:** Boot once. (`init_DCO_calibration` block below is unreachable — see that function.)
-- `loop()` — Core 0: MIDI USB+DIN every iteration; Serial2 + USB CDC pumps on `timer1msFlag`; LFO1/LFO2 ~50 µs; drift ~51 µs; `bench_poll_core0` + `mem_diag_poll_core0`. `__not_in_flash_func`.
+  - **When:** Boot once.
+- `loop()` — Core 0: MIDI USB+DIN every iteration; Serial2 + USB CDC pumps on `timer1msFlag`; `preset_store_boot_task()` (one-shot ~1.5 s); LFO1/LFO2 ~50 µs; drift ~51 µs; `bench_poll_core0` + `mem_diag_poll_core0`. `__not_in_flash_func`.
   - **Called from:** Arduino framework (Core 0).
   - **When:** Forever.
 - `loop1()` — Core 1: `microsTimer2`; noise fleet; auto/manual cal **or** ADSR + FIFO pop + `voice_task_main`; ends with `bench_service(1)` + `mem_diag_poll_core1`. `__not_in_flash_func`.
@@ -134,7 +145,7 @@ Heap + per-core stack snapshot (`ENABLE_MEM_DIAG` only). Works without `RUNNING_
 
 ### `include_all.h`
 
-Umbrella include (`mem_diag.h` included). **No function definitions.**
+Umbrella include (`mem_diag.h`, `preset_store.h`, …). **No function definitions.**
 
 ### `globals.h`
 
@@ -207,8 +218,8 @@ Real-time voice engine (float/fixed), allocation, pitch tables, amp/PW helpers.
 - `voice_task_float()` — Float hot path (RP2350 default). `__not_in_flash_func` (SRAM-pinned like fixed). Clkdiv via `clkdiv_live_hz_total_cycles` (`CLKDIV_MODE`).
   - **Called from:** `voice_task_main()` when `USE_FLOAT_VOICE_TASK`.
   - **When:** Every play-path `loop1` iter (float-engine builds).
-- `voice_task_autotune()` — Drive one osc for calibration measurement.
-  - **Called from:** `loop1()` (manual cal); `measure_gap_for_amp` / PW & freq search helpers in `PID.ino` / `autotune.ino`; unreachable call in `setup1`.
+- `voice_task_autotune()` — Drive one osc for calibration measurement (mode 4 reads `calibrationFreqHz`).
+  - **Called from:** `loop1()` (manual cal); `measure_gap_for_amp` / PW & freq search helpers in `autotune_search.ino` / `autotune.ino`.
   - **When:** Manual-cal every `loop1`; nested during auto-cal measurements.
 - `get_free_voice_sequential()` — Round-robin free voice.
   - **Called from:** `note_on()` when `polyMode == 1`.
@@ -613,25 +624,43 @@ Constants only. **No function definitions.**
 
 **Functions**
 - `disable_all_oscillators_and_range_pwm()` — Mute oscs / park RANGE (PIO `range_pio_set_level(DIV_COUNTER)` when `RANGE0_PIO_DITHER_TEST`, else GPIO high); calls `reset_pw_to_DIV_COUNTER_PW`.
-  - **Called from:** `init_DCO_calibration()`, `DCO_calibration()`, `restart_DCO_calibration()`.
-  - **When:** Cal setup (note `init_DCO_calibration` unreachable at boot).
+  - **Called from:** `DCO_calibration()`, `restart_DCO_calibration()`.
+  - **When:** Cal setup.
 - `reset_pw_to_DIV_COUNTER_PW()` — Shared PW PWM → max wrap.
   - **Called from:** `disable_all_oscillators_and_range_pwm()`.
   - **When:** Cal setup.
-- `init_DCO_calibration()` — Legacy/boot cal kickoff.
-  - **Called from:** `setup1()` only if `calibrationFlag` — but flag is set `false` just above → **unreachable**.
-  - **When:** Would be boot; currently never.
 - `DCO_calibration()` — Full auto-cal: PW center/limits once on voice 0, then `calibrate_DCO` + FS write per osc 0..2, reload, precompute; clears `calibrationFlag`.
   - **Called from:** `loop1()` when `calibrationFlag && !manualCalibrationFlag`.
   - **When:** Auto-cal (blocking one-shot).
-- `restart_DCO_calibration()` — Reset state between oscillators.
-  - **Called from:** `DCO_calibration()` per osc.
+- `restart_DCO_calibration()` — Reset state/table header between oscillators.
+  - **Called from:** `DCO_calibration()` (PW pass and per osc).
   - **When:** Auto-cal.
-- `find_PW_for_target_duty()` — Search PW for target duty.
+- `set_pw_and_measure()` — Program PW value, sync `PW[]`/debug tracker, settle, `measure_gap(2)`.
+  - **Called from:** all PW search phases (`pw_coarse_scan`, `pw_bisect_bracket`, `pw_fine_scan_around_best`, `pw_lock_in`, `search_PW_limit_from_center`).
+  - **When:** Auto-cal PW stage.
+- `pw_search_state_init()` / `pw_record_sample()` — `PWSearchState` init and valid-sample bookkeeping (best candidate, in-tolerance count, valid table).
+  - **Called from:** `find_PW_for_target_duty()` and its phases.
+  - **When:** Auto-cal PW stage.
+- `pw_coarse_scan()` — Phase 1: scan PW range for a sign-change bracket; probes the interpolated crossing.
+  - **Called from:** `find_PW_for_target_duty()`.
+  - **When:** Auto-cal PW stage.
+- `pw_bisect_bracket()` — Phase 2a: bisection within the bracket (14 iters max).
+  - **Called from:** `find_PW_for_target_duty()` when a bracket was found.
+  - **When:** Auto-cal PW stage.
+- `pw_fine_scan_around_best()` — Phase 2b: local fine scan when no bracket was found.
+  - **Called from:** `find_PW_for_target_duty()`.
+  - **When:** Auto-cal PW stage.
+- `pw_lock_in()` — Demand 3 consecutive in-band readings at one PW (8 tries max).
+  - **Called from:** `pw_select_and_lock()` (candidate + local refinement).
+  - **When:** Auto-cal PW stage.
+- `pw_select_and_lock()` — Phase 3: pick best candidate from the valid table, lock in, refine PW±2.
+  - **Called from:** `find_PW_for_target_duty()`.
+  - **When:** Auto-cal PW stage.
+- `find_PW_for_target_duty()` — Orchestrates the PW target-duty search phases; returns fallback PW on failure.
   - **Called from:** `find_PW_center()`.
   - **When:** Auto-cal PW stage.
 - `find_PW_center()` — Find ~50% PW center; `update_FS_PWCenter`.
-  - **Called from:** `DCO_calibration()` (even DCOs).
+  - **Called from:** `DCO_calibration()` (voice 0, once).
   - **When:** Auto-cal.
 - `search_PW_limit_from_center()` — Walk PW toward low/high duty limit.
   - **Called from:** `find_PW_limit_v2()`.
@@ -639,8 +668,8 @@ Constants only. **No function definitions.**
 - `find_PW_limit_v2()` — High-level PW limit; persist low/high via FS.
   - **Called from:** `DCO_calibration()` (LOW then HIGH).
   - **When:** Auto-cal.
-- `find_gap()` — Edge-time duty/freq measurement on cal pin; timeout logs `raw` / `edges` / `rejected` / `accepted`.
-  - **Called from:** `measure_gap()`; also direct inside `#if 0` legacy PID.
+- `find_gap()` — Edge-time duty measurement on cal pin (all state local); timeout logs `raw` / `edges` / `rejected` / `accepted`.
+  - **Called from:** `measure_gap()`.
   - **When:** Cal measurement (live via wrapper).
 - `cal_sense_probe_log()` — 40 ms raw cal-sense edge probe (no period gate); `[CAL_SENSE] pin=…` ~2 Hz.
   - **Called from:** `DCO_calibration_debug()` on gap timeout.
@@ -649,26 +678,24 @@ Constants only. **No function definitions.**
   - **Called from:** `loop1()` manual-cal branch every iter.
   - **When:** Manual-cal.
 
-### `PID.h`
+### `autotune_search.ino`
 
-Globals / prototypes. **No function definitions.**
-
-### `PID.ino`
+Replaces the old `PID.ino` (the `PID_v1` dependency and legacy PID routines were removed; the file never actually used PID for the live calibration path).
 
 **Functions**
 - `compute_gap_tolerance_for_freq()` — Duty tolerance vs frequency.
-  - **Called from:** `calibrate_DCO()`; `find_PW_center()` (via same helper visibility).
+  - **Called from:** `calibrate_DCO()`; `find_PW_center()`.
   - **When:** Auto-cal.
 - `did_sign_change()` — Detect gap error sign flip.
   - **Called from:** `calibrate_DCO()`.
   - **When:** Auto-cal amp search.
-- `measure_gap_for_amp()` — Set amp PWM, `voice_task_autotune`, `measure_gap`.
+- `measure_gap_for_amp()` — Set amp PWM, `voice_task_autotune`, `measure_gap`; normalizes sign (positive = amplitude too low).
   - **Called from:** `calibrate_DCO()`.
   - **When:** Auto-cal.
 - `update_best_from_neighbours()` — Probe neighbour amps; keep best.
   - **Called from:** `calibrate_DCO()`.
   - **When:** Auto-cal.
-- `step_amp_from_error()` — Step range PWM from signed error.
+- `step_amp_from_error()` — Return ±1/±2 PWM step from signed error (caller clamps to bounds).
   - **Called from:** `calibrate_DCO()`.
   - **When:** Auto-cal.
 - `compute_initial_amp_for_note()` — Initial amp guess (uses log/quadratic interp).
@@ -677,34 +704,21 @@ Globals / prototypes. **No function definitions.**
 - `store_note_result()` — Write `[freq,pwm]` into `calibrationData`.
   - **Called from:** `calibrate_DCO()`.
   - **When:** Auto-cal per note.
-- `init_PID()` — Init `PID_v1` object/mode.
-  - **Called from:** `setup1()`.
-  - **When:** Boot (PID still inited even though main cal no longer uses it).
-- `PID_dco_calibration()` — Legacy PID note loop.
-  - **Called from:** **`#if 0` (compiled out)**.
-- `PID_find_highest_freq()` — Legacy PID highest-freq helper.
-  - **Called from:** **`#if 0` (compiled out)**.
-- `find_highest_freq()` — Search highest usable freq (Hz×100).
+- `find_highest_freq()` — Bisection search for highest usable freq at full RANGE PWM (Hz×100); drives `voice_task_autotune(4, …)` via `calibrationFreqHz`. No PID.
+  - **Called from:** `calibrate_DCO()`.
+  - **When:** Auto-cal, when the table reaches the top of the PWM range.
+- `find_lowest_freq()` — Estimate lowest usable freq at RANGE PWM 0 (uses `linearInterpolation` / quadratic).
   - **Called from:** `calibrate_DCO()`.
   - **When:** Auto-cal span setup.
-- `find_lowest_freq()` — Search lowest usable freq (uses `linearInterpolation` / quadratic).
-  - **Called from:** `calibrate_DCO()`.
-  - **When:** Auto-cal span setup.
-- `calibrate_DCO()` — Main per-note amp-table builder.
+- `calibrate_DCO()` — Main per-note amp-table builder. Guards: max 300 iterations / 30 s per note, max 20 consecutive gap timeouts, PWM clamped to the per-note `[minAmpComp, maxAmpComp]` window (break-with-best when stuck at a bound).
   - **Called from:** `DCO_calibration()`.
   - **When:** Auto-cal.
 - `quadraticInterpolation()` — 3-point quadratic `y(x)`.
   - **Called from:** `compute_initial_amp_for_note()`; `find_lowest_freq()`.
   - **When:** Auto-cal.
-- `exponentialInterpolation()` — Exp interpolate → uint16.
-  - **Called from:** **none (dead)**.
 - `logarithmicInterpolation()` — Log interpolate → uint16.
   - **Called from:** `compute_initial_amp_for_note()`.
   - **When:** Auto-cal.
-- `logarithmicInterpolationFloat()` — Log interpolate float.
-  - **Called from:** **none (dead)**.
-- `logarithmicInterpolationDouble()` — Log interpolate double.
-  - **Called from:** **none (dead)**.
 - `linearInterpolation()` — Linear interpolate.
   - **Called from:** `find_lowest_freq()`.
   - **When:** Auto-cal.
@@ -714,14 +728,18 @@ Globals / prototypes. **No function definitions.**
 
 ### `FS.h`
 
-Constants / buffers; declares fake-calibration helpers under `ENABLE_FS_CALIBRATION`.
+Constants / buffers; declares fake-calibration helpers under `ENABLE_FS_CALIBRATION`;
+declares `write_fs_bank()` (shared with preset bulk restore).
 
 ### `FS.ino`
 
 **Functions**
+- `write_fs_bank()` — Truncate/create a LittleFS file and write a full bank in one shot.
+  - **Called from:** cal `update_FS_*` paths; `preset_bulk_commit()` for cal targets.
+  - **When:** Cal persist; host bulk restore.
 - `init_FS()` — Mount LittleFS; load tables into float or Q8 arrays.
-  - **Called from:** `setup1()`; end of `DCO_calibration()`; end of `seed_fake_calibration_tables()`.
-  - **When:** Boot; after auto-cal write; after fake seed.
+  - **Called from:** `setup1()`; end of `DCO_calibration()`; end of `seed_fake_calibration_tables()`; `preset_bulk_commit()` after cal restore.
+  - **When:** Boot; after auto-cal write; after fake seed; after bulk cal restore.
 - `update_FS_voice()` — Persist one osc amp table.
   - **Called from:** `DCO_calibration()` per osc; `seed_fake_calibration_tables()`.
   - **When:** Auto-cal; fake seed.
@@ -743,6 +761,42 @@ Constants / buffers; declares fake-calibration helpers under `ENABLE_FS_CALIBRAT
 - `seed_fake_calibration_tables(force)` — Write full fake amp-comp + PW banks to LittleFS (`"w"` truncate), then `init_FS()`. Precomputes when `force=true`. Silent (no Serial). `force=false` only if `voiceTables` is missing.
   - **Called from:** `setup1()` with `false` (before `init_FS`); `apply_param_debug_command` case **30** with `true`.
   - **When:** Boot if file missing; on-demand force-overwrite.
+
+### `preset_store.h`
+
+MCU preset record layout, CRC32 helpers, `preset_param_is_persistable()`, shadow
+capture, bulk target enums, `preset_store_boot_task()`. Deep doc: [`PRESET_STORE.md`](PRESET_STORE.md).
+
+### `preset_store.ino`
+
+**Functions**
+- `preset_store_save()` — Build 598-byte record from shadow + block globals; write into chunk file `pbNN` (4 records/file); update `pstLast`; print `[preset] saved…`.
+  - **Called from:** `apply_param_preset_save()`.
+  - **When:** `'p'` 170 / host “save board live state”.
+- `preset_store_load()` — Read/validate record; apply params + blocks; mirror to Input; update `pstLast`; print `[preset] loaded…`; `serial_send_preset_loaded_to_mb()` (`'L'`).
+  - **Called from:** `apply_param_preset_load()`; `handleProgramChange()`; `preset_store_boot_recall()`.
+  - **When:** `'p'` 171; MIDI PC; boot recall.
+- `preset_store_send_directory_to_mb()` — Send all 256 slots as `'O'` frames (`[slot][name:16]`, blank = unused) over `Serial2`.
+  - **Called from:** `input_handle_preset_dir_request()`.
+  - **When:** `'N'` Serial RX (Input boot / browse-mode-enter).
+- `preset_store_dump()` — −1 → `[pdir]` listing; 0..255 → `[dump]` hex of slot record.
+  - **Called from:** `apply_param_preset_dump()`.
+  - **When:** `'p'` 172.
+- `preset_store_cal_dump()` — Stream one or all five cal LittleFS files as `[dump]` lines.
+  - **Called from:** `apply_param_cal_dump()`.
+  - **When:** `'p'` 173.
+- `preset_bulk_chunk()` — Stage 32 bytes at offset in bulk buffer (`'B'`).
+  - **Called from:** `input_handle_bulk_chunk()`.
+  - **When:** Serial RX.
+- `preset_bulk_commit()` — CRC-verify staging; write preset slot or cal file; reload cal via `init_FS()`; print `[bulk] ok/err…`.
+  - **Called from:** `input_handle_bulk_commit()`.
+  - **When:** Serial RX.
+- `preset_store_boot_recall()` — Load slot from `pstLast` if present and not calibrating.
+  - **Called from:** `preset_store_boot_task()`.
+  - **When:** Boot one-shot.
+- `preset_store_boot_task()` — Inline in header: after `PRESET_BOOT_RECALL_MS`, clear pending and call `preset_store_boot_recall()`.
+  - **Called from:** `loop()` on `timer1msFlag`.
+  - **When:** Once per boot.
 
 ### `irq_tuner.h` / `irq_tuner.ino`
 
@@ -785,9 +839,9 @@ MIDI CC control surface: the `MIDI_CC_LINEAR` / `MIDI_CC_EXP_TIME` curves, the `
 - `midi_cc_apply()` — Dispatch: a `CC_LOCAL_*` target writes ADSR/filter block globals here (`cv_bake_adsr2_to_vcf_scale` / `cv_bake_lfo2_to_vcf_scale` for the matching depth CC; CUTOFF/RESONANCE assign without scale bake). PW (`PARAM_PW_VALUE`) and EnvVCA→VCA (`PARAM_ADSR1_TO_VCA`) and every other mapped ParamId go to `update_parameters()` plus `serial_echo_persistable_param16()`.
   - **Called from:** `midi_cc_handle()`.
   - **When:** MIDI callback.
-- `handleProgramChange()` — Stub / empty as implemented.
+- `handleProgramChange()` — `preset_store_load(midiPresetBank*128 + program)` when slot < 256 (CC 0/32 latch bank).
   - **Called from:** MIDI library.
-  - **When:** MIDI callback.
+  - **When:** MIDI program change.
 - `handlePitchBend()` — Sets `midi_pitch_bend`.
   - **Called from:** MIDI library.
   - **When:** MIDI callback.
@@ -806,12 +860,13 @@ MIDI CC control surface: the `MIDI_CC_LINEAR` / `MIDI_CC_EXP_TIME` curves, the `
 
 ### `Serial.h`
 
-Prototype. **No function definitions.**
+Prototypes; defines `SERIAL_INNER_MAX_PAYLOAD` **36** (for `'B'` bulk chunk) before
+including `serial_frame.h`. Declares block-echo helpers used after preset load.
 
 ### `Serial.ino`
 
 **Functions**
-- `init_serial()` — Serial1 MIDI baud (RX 1 / TX 0 @ 31250, IRQ/`setPollingMode(false)`), Serial2 2.5M Input link against the Input's `Serial1` (RX 21 from Input TX GP0, TX 20 into Input RX GP1); builds the O(1) command LUT.
+- `init_serial()` — Serial1 MIDI baud (RX 1 / TX 0 @ 31250, IRQ/`setPollingMode(false)`), Serial2 2.5M Input link against the Input's `Serial1` (RX 21 from Input TX GP0, TX 20 into Input RX GP1); builds the O(1) command LUT (incl. `'B'`/`'C'`/`'N'`).
   - **Called from:** `setup()`.
   - **When:** Boot Core0.
 - `input_handle_adsr1()` / `input_handle_adsr2()` / `input_handle_adsr3()` — `'a'`/`'b'`/`'c'` LE → EnvVCA / EnvVCF / EnvDCO (`ADSR1_*`) times.
@@ -823,9 +878,21 @@ Prototype. **No function definitions.**
 - `input_handle_param16()` — `'p'` → `update_parameters` (id + i16 LE); USB ingress also `serial_echo_persistable_param16`.
   - **Called from:** parser LUT.
   - **When:** Serial RX.
-- `input_handle_preset_name()` — `'q'` → `presetName[]` (8 chars).
+- `input_handle_preset_name()` — `'q'` → `presetName[]` (16 chars).
   - **Called from:** parser LUT.
   - **When:** Serial RX.
+- `input_handle_bulk_chunk()` / `input_handle_bulk_commit()` — `'B'`/`'C'` → `preset_bulk_chunk` / `preset_bulk_commit`.
+  - **Called from:** parser LUT.
+  - **When:** Serial RX (USB bench restore).
+- `input_handle_preset_dir_request()` — `'N'` → `preset_store_send_directory_to_mb()` (256× `'O'` frames on `Serial2`).
+  - **Called from:** parser LUT.
+  - **When:** Serial RX (Input boot / browse-mode-enter).
+- `serial_send_adsr_vca_block_to_mb()` / `serial_send_adsr_vcf_block_to_mb()` / `serial_send_adsr_dco_block_to_mb()` / `serial_send_filter_block_to_mb()` — Mirror current block globals to Input as `'a'`–`'d'`.
+  - **Called from:** `preset_record_apply()` after load.
+  - **When:** Preset recall.
+- `serial_send_preset_loaded_to_mb()` — `'L'` `[slot]` to Input.
+  - **Called from:** `preset_store_load()`.
+  - **When:** End of every successful load (boot recall, MIDI PC, USB/`dco_control`, Input).
 - `serial_panel_task()` — Non-blocking parser pump (`serial_parser_drain`). Sets ingress `PARAM_SRC_INPUT`. `__not_in_flash_func`.
   - **Called from:** `loop()` when `timer1msFlag`.
   - **When:** Realtime Core0, ~1 ms.
@@ -838,9 +905,9 @@ Prototype. **No function definitions.**
 - `serialSendParam16()` — Slim `'p'` TX via `serial_frame_write` (id + i16 LE, 3 B) out Serial2. Drops if `availableForWrite() < 1`.
   - **Called from:** `serial_echo_persistable_param16()`.
   - **When:** USB/MIDI apply of a persistable id.
-- `serial_echo_persistable_param16()` — If id is LittleFS-persistable, `serialSendParam16` (wire i16, not Q24). Skips cal/debug/UI and `'a'`–`'d'`.
-  - **Called from:** `input_handle_param16()` (USB ingress); `midi_cc_apply()` default.
-  - **When:** USB/MIDI apply of a persistable id.
+- `serial_echo_persistable_param16()` — If `preset_param_is_persistable(id)`, `serialSendParam16` (wire i16, not Q24). Skips cal/debug/UI/preset-cmd ids and `'a'`–`'d'`.
+  - **Called from:** `input_handle_param16()` (USB ingress); `midi_cc_apply()` default; `preset_record_apply()`.
+  - **When:** USB/MIDI apply of a persistable id; after preset load.
 - `serialSendParam32()` — Slim `'x'` TX via `serial_frame_write` (id + u32 LE, 5 B) out Serial2 TX 20 into Input `Serial1` RX GP1 (gap 154, cal 155; Input relays 154 to Screen). Drops if `availableForWrite() < 1`.
   - **Called from:** `apply_param_manual_calibration_flag()`; `DCO_calibration_debug()`.
   - **When:** Manual-cal param / live gap report.
@@ -851,11 +918,11 @@ Compatibility stub that includes `serial_input_protocol.h`. Mainboard `'n'`/`'o'
 
 ### `serial_input_protocol.h`
 
-Command bytes + payload sizes + `serial_input_payload_len()`. `'p'` is Input→DCO apply and DCO→Input persistable mirror. **No other function definitions.**
+Command bytes + payload sizes + `serial_input_payload_len()`. Includes `'B'` (36) / `'C'` (8) bulk restore and `'N'` (1, unused pad byte) / `'O'` (17) / `'L'` (1) Input directory sync. `'p'` is Input→DCO apply and DCO→Input persistable mirror. `'q'` is 16 ASCII bytes. **No other function definitions.**
 
 ### `serial_frame.h`
 
-Inner pack/unpack + buffer COBS encode/decode + `serial_frame_stuff` / `unstuff` / `write()`. Default `SERIAL_FRAMING_RAW` (on-wire = inner). `#define SERIAL_FRAMING_COBS` in `DCO.ino` wraps `COBS(inner)+0x00`. `#error` if both flags are forced. `SERIAL_INNER_MAX_PAYLOAD` overridable (`#ifndef`, default 8; Input/Screen set 17). `SERIAL_FRAME_DELIMITER` `0x00` never a command. Codec has no Stream type — UART today, SPI later.
+Inner pack/unpack + buffer COBS encode/decode + `serial_frame_stuff` / `unstuff` / `write()`. Default `SERIAL_FRAMING_RAW` (on-wire = inner). `#define SERIAL_FRAMING_COBS` in `DCO.ino` wraps `COBS(inner)+0x00`. `#error` if both flags are forced. `SERIAL_INNER_MAX_PAYLOAD` overridable (`#ifndef`, default 8; DCO sets **36** in `Serial.h` for `'B'`; Input/Screen set 17). `SERIAL_FRAME_DELIMITER` `0x00` never a command. Codec has no Stream type — UART today, SPI later.
 
 **Functions**
 - `serial_cobs_encode()` / `serial_cobs_decode()` — Buffer COBS; decode src has no trailing `0x00`.
@@ -897,7 +964,7 @@ Non-blocking inner-frame parser. RAW: cmd LUT + fixed payload. COBS (`SERIAL_FRA
 
 ### `params_def.h`
 
-`enum ParamId` only. **No function definitions.**
+`enum ParamId` only (incl. `PARAM_PRESET_SAVE` 170 … `PARAM_CAL_DUMP` 173). **No function definitions.**
 
 ### `param_router.h`
 
@@ -917,10 +984,10 @@ Non-blocking inner-frame parser. RAW: cmd LUT + fixed payload. COBS (`SERIAL_FRA
 - `init_param_router()` — Build O(1) jump table from `paramTable[]`.
   - **Called from:** `setup()`.
   - **When:** Boot Core0.
-- `update_parameters()` — Route param id/value through the jump table.
-  - **Called from:** `input_handle_param16()`; `midi_cc_apply()` default.
-  - **When:** `'p'` frames / MIDI CC.
-- All `apply_param_*()` below — **Called from:** **param table only** (never direct). **When:** matching Serial2 ParamId.
+- `update_parameters()` — `preset_shadow_capture()` then route id/value through the jump table.
+  - **Called from:** `input_handle_param16()`; `midi_cc_apply()` default; `preset_record_apply()`.
+  - **When:** `'p'` frames / MIDI CC / preset load.
+- All `apply_param_*()` below — **Called from:** **param table only** (never direct). **When:** matching ParamId.
 
 - `apply_param_osc*_saw/pulse/tri_enable()` — Per-osc wave enables → `update_waveSelector()`.
 - `apply_param_osc1_level()` / `apply_param_osc2_level()` / `apply_param_osc3_level()` / `apply_param_sub_level()` — Mix level **bases** (PWM via matrix in `update_CV_outs`).
@@ -968,6 +1035,7 @@ Non-blocking inner-frame parser. RAW: cmd LUT + fixed payload. COBS (`SERIAL_FRA
 - `apply_param_manual_calibration_offset()` — Per-osc manual offset.
 - `apply_param_manual_calibration_store()` — → `update_FS_ManualCalibrationOffset`.
 - `apply_param_character()` — `PARAM_CHARACTER` (221): master 0..128 → `character_recompute_scales()`. See [`CHARACTER.md`](CHARACTER.md).
+- `apply_param_preset_save()` / `apply_param_preset_load()` / `apply_param_preset_dump()` / `apply_param_cal_dump()` — ParamIds 170–173 → `preset_store_*`. See [`PRESET_STORE.md`](PRESET_STORE.md).
 - `apply_param_debug_command()` — Bench diagnostics (id 160): 1 → `pio_topology_report()`, 2/3 → `pio_period_probe()` at a low/high divider, **4 → `subosc2_report()`**, 10/11/12 → profiler dump / reset / periodic toggle (`RUNNING_AVERAGE`), **13 → `mem_diag_request()`** (heap/stack; `ENABLE_MEM_DIAG` + runtime polls on; [`MEMORY.md`](MEMORY.md)), **14/15 → mem_diag polls off/on** (ack `mem_diag polls=…`; `compiled out` if flag off), 20–22 → amp-comp method (FLOAT_QUAD / LUT / FIXED), 24/25 → amp-comp speed/accuracy (`AMP_COMP_BENCHMARK` + `RUNNING_AVERAGE`), 28/29 → pitch-interp speed/accuracy (`RUNNING_AVERAGE`), 30 → force-seed fake calibration tables, **32/33 → clkdiv all six vs GOLD_REF** (both voice engines; `RUNNING_AVERAGE`), **200–50000** (uint16) → set `pioPulseLength` and reload running SMs via `pio_defer_request_reset_pulse_all()`, **0xC8xx / 0xCAxx / 0xCBxx** → Character-tab axis jitters (amp / pitch / PW) then recompute scales. Period probes only hold with no note playing.
 
 ---
@@ -1065,7 +1133,8 @@ All detailed docs live under `docs/` (this file included). Root `README.md` is t
 | `docs/schematics/distortion/` | KiCad 10 project (`distortion.kicad_pro`) for the distortion stage. |
 | `docs/REFERENCE_AI.md` | Deep semantic map. |
 | `docs/FILE_INDEX.md` | This file — files, functions, call sites. |
-| `docs/README_serial_and_params.md` | Slim inner serial / ParamId how-to, including MIDI CC and RAW vs COBS A/B. |
+| `docs/PRESET_STORE.md` | MCU 256-slot presets, cal dump/restore, `'B'`/`'C'`, text dump protocol. |
+| `docs/README_serial_and_params.md` | Slim inner serial / ParamId how-to, including MIDI CC, RAW vs COBS, preset cmds. |
 | `docs/MIDI_CC_MAP.md` | **Generated** — MIDI CC implementation chart. |
 | `docs/Serial_comms_and_params_reference.txt` | **Archive** — Mainboard-era protocol notes. |
 | `docs/AUTOTUNE.md` | Autotune algorithms. |
@@ -1092,7 +1161,7 @@ All detailed docs live under `docs/` (this file included). Root `README.md` is t
 | `DCO_Noise` | `_build_libs/DCO_Noise` (symlink → monorepo root) | `noise.h` fleet |
 | `mo-lfo` | `_build_libs/mo-lfo` | `LFO.*` |
 | `MIDI_Library` | `_build_libs/MIDI_Library` | `midi.*` |
-| `PID_v1` | `_build_libs/PID_v1` | `PID.*` / `init_PID` |
+| `PID_v1` | `_build_libs/PID_v1` | **unused** (kept on disk; the autotune cleanup removed the last user) |
 
 ## 10. Other external dependencies
 
@@ -1108,9 +1177,10 @@ All detailed docs live under `docs/` (this file included). Root `README.md` is t
 | Goal | Start here |
 |------|------------|
 | Engine float/fixed | `DCO.ino` flags → `voice_task_main` |
-| New ParamId | `params_def.h` → `params.ino` table (only call path) |
+| New ParamId | `params_def.h` → `params.ino` table (only call path); persistable patch ids also `preset_param_is_persistable` |
 | Serial command | `serial_input_protocol.h` + `serial_frame.h` + `Serial.ino` handlers ← `serial_panel_task` (Serial2) and `serial_usb_task` (USB CDC) in `loop` |
-| Control the board with no panel | [`tools/dco_control`](../tools/dco_control/README.md) over USB; needs `ENABLE_USB_CONTROL` |
+| MCU preset / cal dump | [`PRESET_STORE.md`](PRESET_STORE.md); `preset_store.*`; host [`tools/dco_control`](../tools/dco_control/README.md) |
+| Control the board with no panel | [`tools/dco_control`](../tools/dco_control/README.md) over USB; needs `ENABLE_USB_CONTROL` + LittleFS flash slice |
 | Start auto-cal | Param → `apply_param_calibration_flag` → `loop1` → `DCO_calibration` |
 | Manual cal UI | `apply_param_manual_calibration_*` → `loop1` manual branch |
 | MIDI notes | `loop` → MIDI `.read` → `note_on`/`note_off` → local `noteStart[]`/`noteEnd[]` (no serial note frames) |

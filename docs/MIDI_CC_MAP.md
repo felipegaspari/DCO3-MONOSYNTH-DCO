@@ -1,6 +1,6 @@
 # MIDI CC implementation chart
 
-Generated from `tools/dco_control/params.py` by `tools/dco_control/gen_midi_map.py`. Do not edit by hand.
+Generated from `DCO-CONTROL-PANEL/params.py` by `DCO-CONTROL-PANEL/gen_midi_map.py`. Do not edit by hand.
 
 Every control the bench app exposes is reachable from a 7-bit CC on any channel (the DCO listens omni), over USB MIDI or the DIN input. The board does not send anything back, so a panel should push its state after connecting.
 
@@ -203,6 +203,6 @@ Every non-reserved 7-bit controller is already assigned (0 free). Sub-oscillator
 - **Run autotune** (parameter 150)
 - **Store manual cal offsets** (parameter 156)
 
-Autotune takes the board over for about a minute and the store writes the filesystem, so neither should be one stray controller away. Both are still available from the serial bench app in `tools/dco_control`.
+Autotune takes the board over for about a minute and the store writes the filesystem, so neither should be one stray controller away. Both are still available from the serial bench app in `DCO-CONTROL-PANEL`.
 
-Reserved controllers left untouched: 0, 1, 6, 7, 10, 11, 32, 38, 42, 64, 98, 99, 100, 101, 120, 121, 122, 123, 124, 125, 126, 127. CC 42 keeps its historical meaning here, pitch-bend range in semitones. 98-101 stay free so a later NRPN upgrade needs no reshuffling. CC 120 (All Sound Off) is reserved and is why LFO2→OSC3 coarse has no assignment.
+Reserved controllers left untouched: 0, 1, 6, 7, 10, 11, 32, 38, 42, 64, 98, 99, 100, 101, 120, 121, 122, 123, 124, 125, 126, 127. CC 0 / CC 32 are Bank Select: nonzero latches bank 1 so the next Program Change recalls slots 128..255 (`midi.ino`). CC 42 keeps its historical meaning here, pitch-bend range in semitones. 98-101 stay free so a later NRPN upgrade needs no reshuffling. CC 120 (All Sound Off) is reserved and is why LFO2→OSC3 coarse has no assignment.

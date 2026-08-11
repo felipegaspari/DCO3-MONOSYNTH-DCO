@@ -11,6 +11,7 @@ Related docs:
 - Hot-path profiling: [`BENCHMARKING.md`](BENCHMARKING.md)
 - SRAM / heap / stack: [`MEMORY.md`](MEMORY.md)
 - Autotune algorithms / refactor layout: [`AUTOTUNE.md`](AUTOTUNE.md), [`AUTOTUNE_REFACTORED.md`](AUTOTUNE_REFACTORED.md)
+- MCU presets / cal dump-restore: [`PRESET_STORE.md`](PRESET_STORE.md)
 - Repo entry point: [`../README.md`](../README.md)
 
 ---
@@ -20,7 +21,7 @@ Related docs:
 - **`DCO.ino`**  
   - Main application for the RP2040 / RP2350.  
   - Runs on both cores using the Arduino dual-core API:
-    - `setup()` / `loop()` (core 0): USB/serial/MIDI I/O, LFO evaluation (~50 µs tick).
+    - `setup()` / `loop()` (core 0): USB/serial/MIDI I/O, LFO evaluation (~50 µs tick), one-shot `preset_store_boot_task()` after ~1.5 s.
     - `setup1()` / `loop1()` (core 1): PID & FS init, ADSR init, DCO calibration/autotune, real‑time voice engine.  
   - **Engine build options** (top of file: **pitch ids** → **board defaults** → **overrides** → **guards** → profiling / board):
     - Board defaults (both MCUs): fixed voice/amp/CV (no `USE_FLOAT_*`), `PITCH_INTERP_RATIO_Q16`, amp method `FIXED`, `CLKDIV_MODE CLKDIV_Q16`. No `USE_FLOAT_ENGINE` umbrella.
@@ -217,37 +218,26 @@ Related docs:
     - **`autotune_constants.h`** — shared constants / sizes.
     - **`autotune_context.h`** — `DCOCalibrationContext` grouping for `calibrate_DCO`.
     - **`autotune_measurement.h`** — structured `GapMeasurement` wrappers around edge timing.
-  - `init_DCO_calibration()`:
-    - Sets initial note, PWM centre and target sample counts, clears accumulators and global flags.
-    - Ensures all oscillators are temporarily muted and PW is centralized before measuring.
-    - Runs `voice_task_autotune()` to feed the PIO with an initial calibration waveform.
-  - `DCO_calibration()` / `VCO_calibration()`:
-    - High‑level procedures that:
-      - Iterate across all oscillators and notes.
-      - For each oscillator, optionally find PW centre (`find_PW_center()`), then call `calibrate_DCO()` to populate `calibrationData[]`.
-      - Persist data using `update_FS_voice()` and refresh amp‑comp tables with `init_FS()` and `precompute_amp_comp_for_engine()`.
+  - `DCO_calibration()`:
+    - High‑level procedure (called from `loop1()` on `calibrationFlag`):
+      - Calibrates the shared PW once on voice 0 (`find_PW_center()`, `find_PW_limit_v2()` low/high).
+      - For each oscillator, `restart_DCO_calibration()` then `calibrate_DCO()` to populate `calibrationData[]`.
+      - Persists data using `update_FS_voice()` and refreshes amp‑comp tables with `init_FS()` and `precompute_amp_comp_for_engine()`.
   - `restart_DCO_calibration()`:
-    - Reset calibration state, PWM levels and measurement accumulators between oscillators.
-  - `find_PW_center()` / `find_PW_low_limit()`:
-    - Step PW until the measured duty cycle gap around 50% (or low limit) is within a target tolerance using `find_gap()`.
-    - Persist PW calibration values into LittleFS via `update_FS_PWCenter()` / `update_FS_PW_Low_Limit()`.
-  - `find_gap()` / `DCO_calibration_find_highest_freq()` / `DCO_calibration_debug()` / `VCO_measure_frequency()`:
-    - Edge‑timing routines that measure the DCO duty cycle or frequency at the calibration pin, using pulse timing over multiple cycles.
-    - Provide raw error values (`DCO_calibration_difference`) used by PID, search routines or calibration heuristics.
-  - `calibrate_DCO()` and interpolation helpers (`quadraticInterpolation`, `exponentialInterpolation`, `logarithmicInterpolation*`, `linearInterpolation`, `expInterpolationSolveY()`):
-    - Use a mix of polynomial, exponential and logarithmic interpolation to derive good amplitude starting points between measured calibration anchors.
+    - Reset the note schedule and `calibrationData` header between oscillators; re‑arms RANGE pin/PIO.
+  - `find_PW_center()` / `find_PW_limit_v2()`:
+    - PW target-duty searches built on the phased `find_PW_for_target_duty()` (coarse scan → bisection or fine scan → lock‑in) and `search_PW_limit_from_center()`; all probes go through `set_pw_and_measure()`.
+    - Persist PW calibration values into LittleFS via `update_FS_PWCenter()` / `update_FS_PW_Low_Limit()` / `update_FS_PW_High_Limit()`.
+  - `find_gap()` / `DCO_calibration_debug()`:
+    - Edge‑timing measurement core (state fully local) that measures the DCO duty cycle at the calibration pin; consumed via the `measure_gap()` wrapper.
 
-- **`PID.h` / `PID.ino`**  
-  - Wraps the `PID_v1` Arduino library for use in calibration and frequency search:
-    - Defines PID terms (three Kp/Ki/Kd presets), gap tracking, output limits and helper variables.
-    - `init_PID()` initializes PID state and setpoint.
-  - `PID_dco_calibration()`:
-    - Main PID‑driven DCO calibration loop:
-      - Uses `find_gap()` to measure duty‑cycle errors.
-      - Adjusts `ampCompCalibrationVal` until the gap is below `PIDMinGap`, tracking best candidates and detecting oscillation (“flip”) conditions.
-      - When calibrated for a note, stores the result, advances to the next note, recomputes min gap and limits, and triggers new `voice_task_autotune()` runs.
-  - `PID_find_highest_freq()`, `find_highest_freq()`, `find_lowest_freq()`:
-    - PID‑based search helpers used in some calibration modes to identify highest/lowest usable frequencies per DCO.
+- **`autotune_search.ino`** (formerly `PID.ino`; the `PID_v1` dependency was removed)  
+  - `calibrate_DCO()`:
+    - Main search‑based amp‑comp loop: interpolated initial guess per note, sign‑change detection with neighbour probing, ±1/±2 stepping clamped to per‑note bounds, iteration/time/timeout guards.
+  - `find_highest_freq()` / `find_lowest_freq()`:
+    - Bisection search at full RANGE PWM (driven via `calibrationFreqHz` → `voice_task_autotune(4, …)`) and quadratic extrapolation to PWM 0, used when the table hits the top of the PWM range.
+  - Interpolation helpers (`quadraticInterpolation`, `logarithmicInterpolation`, `linearInterpolation`, `expInterpolationSolveY()`):
+    - Derive good amplitude starting points between measured calibration anchors.
 
 ---
 
@@ -257,6 +247,7 @@ Related docs:
   - Encapsulates **LittleFS‑based persistent storage** for:
     - DCO amp‑comp tables (`voiceTables` file).
     - PW centre and limit values (`PWCenter`, `PWHighLimit`, `PWLowLimit` files).
+    - Manual calibration offsets (`ManualOffset`).
   - `init_FS()`:
     - Mounts LittleFS and opens/creates calibration files.
     - Reads amp‑comp bank data from flash (`freq_x100` format) and reconstructs either:
@@ -266,6 +257,21 @@ Related docs:
     - Writes a single oscillator’s calibration slice (`calibrationData[]`) back to `voiceTables` in binary form.
   - `update_FS_PWCenter()` / `update_FS_PW_High_Limit()` / `update_FS_PW_Low_Limit()`:
     - Update PW centre and limit values for a given voice in their corresponding files.
+  - `write_fs_bank()` — truncate/create a file and write a full bank (shared with bulk restore).
+
+- **`preset_store.h` / `preset_store.ino`** — MCU **256-slot patch store** + host dump/restore. Deep doc: [`PRESET_STORE.md`](PRESET_STORE.md).
+  - Fixed **598-byte** records packed 4-per-file in `pb00`…`pb63` (512 KB FS); `pstLast` for boot/MIDI recall.
+  - Live shadow: `update_parameters()` → `preset_shadow_capture()` for every persistable ParamId; blocks read from globals at save.
+  - Host control: `'p'` ParamIds 170–173 (save/load/dump/cal-dump), `'B'`/`'C'` bulk chunk/commit, `'q'` 16-char name before save.
+  - Board → host: structured CDC text (`[dump]` / `[pdir]` / `[preset]` / `[bulk]`).
+  - Recall: MIDI Program Change, `PARAM_PRESET_LOAD`, and `preset_store_boot_task()` (~1.5 s after boot).
+  - Needs a LittleFS flash partition large enough for ~76 KB of preset files + cal banks.
+  - **Input has no LittleFS preset storage of its own** — the DCO's 256 slots are the
+    single source of truth system-wide. `preset_store_send_directory_to_mb()` answers
+    Input's `'N'` directory request with 128 `'O'` frames (`[slot][name:16]`);
+    `serial_send_preset_loaded_to_mb()` sends `'L'` `[slot]` at the end of every
+    `preset_store_load()` so Input's Screen display tracks the DCO's actual current slot
+    regardless of who triggered the load.
 
 ---
 
@@ -279,6 +285,7 @@ Related docs:
   - Handlers:
     - `handleNoteOn()` / `handleNoteOff()` forward events to the internal `note_on()` / `note_off()` functions (voice allocator).
     - `handleControlChange()` uses CC 42 to adjust pitch‑bend range and recompute `pitchBendMultiplier_q24`, then passes every other controller to `midi_cc_handle()`.
+    - `handleProgramChange()` → `preset_store_load(midiPresetBank*128 + program)` (CC 0/32 bank select for 128..255).
     - `handlePitchBend()` updates `midi_pitch_bend` in globals.
   - **MIDI CC control surface** (`midi_cc.h` + the generated `midi_cc_map.h`, chart in `docs/MIDI_CC_MAP.md`):
     - `midi_cc_handle()` finds the controller in `midiCcMap[]`, scales it as `lo + ((hi - lo) * cc + 63) / 127`, and runs envelope attack/decay/release through `linearToExponential(v, 50, 25000)` so a CC lands in the same exp domain the `'a'`-`'c'` block frames carry.
@@ -302,25 +309,32 @@ Related docs:
     - Commands (LE, no finish byte; `0x00` reserved as COBS delimiter):
       - `'a'` / `'b'` / `'c'` – 4×16‑bit ADSR blocks → EnvVCA / EnvVCF / EnvDCO (`ADSR1_*`) times.
       - `'d'` – filter block → `CUTOFF`, `RESONANCE`, `ADSR2toVCF`, `LFO2toVCF`, then `cv_bake_adsr2_to_vcf_scale()` + `cv_bake_lfo2_to_vcf_scale()`. Depth bake / peak math: [`CV_MOD_SCALES.md`](CV_MOD_SCALES.md).
-      - `'p'` – ParamId + int16 LE → `update_parameters()` (includes PW 210, EnvVCA→VCA 222, EnvDCO pitch mode 223). USB/`dco_control` and MIDI also echo persistable `'p'` back to Input (LittleFS RAM); panel Serial2 ingress never echoes (loop prevention).
-      - `'q'` – 8‑char preset name → `presetName[]`.
+      - `'p'` – ParamId + int16 LE → `update_parameters()` (includes PW 210, EnvVCA→VCA 222, EnvDCO pitch mode 223, preset/cal cmds 170–173). USB/`dco_control` and MIDI also echo persistable `'p'` back to Input; panel Serial2 ingress never echoes (loop prevention).
+      - `'q'` – 16‑char preset name → `presetName[]`.
+      - `'B'` / `'C'` – bulk restore chunk (36 B payload) / commit (8 B) for MCU presets and cal tables ([`PRESET_STORE.md`](PRESET_STORE.md)).
+      - `'N'` – Input→DCO only: directory request (1 unused/pad byte — a true 0-byte
+        payload can't dispatch in this parser, see [`PRESET_STORE.md`](PRESET_STORE.md)).
+        Answered with 128 `'O'` frames (`[slot][name:16]`) via `preset_store_send_directory_to_mb()`.
+      - `'L'` – DCO→Input only: `[slot]`, sent once at the end of every successful preset load.
     - O(1) command LUT; 500 µs timeout only when mid-frame and the stream is idle; drain budget 64.
-    - On-wire default is RAW (= inner). `#define SERIAL_FRAMING_COBS` wraps the same inner payloads as `COBS(inner)+0x00`; host: `dco_control --cobs` / `DCO_SERIAL_COBS=1`. Must match Input/Screen. Buffer codec in `serial_frame.h` is reusable for SPI later.
+    - On-wire default is RAW (= inner). `#define SERIAL_FRAMING_COBS` wraps the same inner payloads as `COBS(inner)+0x00`; host: `dco_control --cobs` / `DCO_SERIAL_COBS=1`. Must match Input/Screen. Buffer codec in `serial_frame.h` is reusable for SPI later. DCO sets `SERIAL_INNER_MAX_PAYLOAD` to 36 for `'B'`.
   - Outgoing helper:
     - `serialSendParam32()` – slim `'x'` via `serial_frame_write` (gap 154, cal offsets 155) out on Serial2 TX 20, received by the Input on its `Serial1`. Payload 5 = `[id][u32 LE]`. Drops if `availableForWrite() < 1`.
-    - `serialSendParam16()` / `serial_echo_persistable_param16()` – slim `'p'` `[id][i16 LE]` for LittleFS-persistable USB/MIDI applies (wire value, not Q24). Input stores locals only (ADSR3→PWM wire − 512) and forwards the same `'p'` to Screen toasts.
+    - `serialSendParam16()` / `serial_echo_persistable_param16()` – slim `'p'` `[id][i16 LE]` for persistable USB/MIDI applies (`preset_param_is_persistable`). Input stores locals only (ADSR3→PWM wire − 512) and forwards the same `'p'` to Screen toasts.
+    - `serial_send_adsr_*_block_to_mb()` / `serial_send_filter_block_to_mb()` – mirror block globals to Input after a preset load.
   - `serial_panel_task()` / `serial_usb_task()` are the parser pumps, called from `loop()` on `timer1msFlag`. USB/DIN MIDI `.read()` still runs every iteration (`turnThruOff`).
   - Shared headers: `serial_input_protocol.h`, `serial_frame.h`, `serial_param_protocol.h`, `serial_parser.h`. How-to: [`README_serial_and_params.md`](README_serial_and_params.md).
 
 - **`params_def.h` / `param_router.h` / `params.ino`**  
   - Canonical `ParamId` enum and table‑driven router.
-  - Central **parameter apply** (`init_param_router()` + O(1) `update_parameters(uint16_t, int16_t)`) for UI/MIDI‑driven changes:
+  - Central **parameter apply** (`init_param_router()` + O(1) `update_parameters(uint16_t, int16_t)`) for UI/MIDI‑driven changes; every call also `preset_shadow_capture()` for persistable ids:
     - Oscillator configuration (wave on/off, intervals, OSC2 detune, sync modes).
     - LFO settings (waveforms, speeds, routing depths, drift spread/speed).
     - Voice/stack mode, unison detune, analog drift amount.
     - Portamento time and mode (time‑based vs slew‑rate) – updates `portamento_time` and `portamento_mode`.
     - ADSR mods (ADSR1→detune, ADSR1→PWM) with precomputed fixed‑point scales (`ADSR1toDETUNE1_scale_q24`). EnvDCO pitch tap: `PARAM_ADSR3_PITCH_MODE` 223 unipolar/centered — [`LFO.md`](LFO.md).
     - Calibration control flags (`calibrationFlag`, `manualCalibrationFlag`, stages, offsets).
+    - Preset store / dump (`PARAM_PRESET_SAVE` 170, `_LOAD` 171, `_DUMP` 172, `PARAM_CAL_DUMP` 173) — DCO-local, not on the MIDI CC map.
     - **Character** (`PARAM_CHARACTER` 221): master scale for noise-driven imperfection; diagnostic axes on `PARAM_DEBUG_COMMAND` 0xC8–0xCB. Deep doc: [`CHARACTER.md`](CHARACTER.md).
   - Converts raw UI values into:
     - Exponential or logarithmic curves using `expConverter*()` helpers.
@@ -397,6 +411,7 @@ This firmware implements a **dual‑core 1-voice × 3-osc DCO monosynth** (RP204
 - A compile-time **float or fixed-point** voice engine (**fixed is the shipping default** on both MCUs) and matching amplitude-compensation paths — see [`BUILD_FLAGS.md`](BUILD_FLAGS.md) / [`ENGINE_OPTIONS.md`](ENGINE_OPTIONS.md).
 - A table‑driven pitch path (portamento, LFOs, drift, ADSR, OSC2/OSC3 interval+detune) feeding PIO clock dividers and RANGE/PW PWM.
 - Robust DCO and PW calibration via edge‑timing (and optional PID), persisted in LittleFS.
+- 256-slot MCU presets (LittleFS chunks) with MIDI Bank Select + Program Change, boot recall, and USB dump/restore for patches and cal tables.
 - MIDI over USB and DIN, plus a high‑speed UART protocol to a main controller for parameters and UI.
 - Clean separation between the hot voice/control loops and slower calibration, storage and UI-facing code.
 

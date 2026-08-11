@@ -607,6 +607,25 @@ static void apply_param_manual_calibration_store(int16_t /*v*/) {
   }
 }
 
+// Preset store commands (see preset_store.h / preset_store.ino). These are
+// command triggers, not patch state: preset_param_is_persistable() excludes
+// them, so they are never captured into the shadow or stored in a record.
+static void apply_param_preset_save(int16_t v) {
+  if (v >= 0 && v < (int16_t)PRESET_NUM_SLOTS) preset_store_save((uint8_t)v);
+}
+
+static void apply_param_preset_load(int16_t v) {
+  if (v >= 0 && v < (int16_t)PRESET_NUM_SLOTS) preset_store_load((uint8_t)v);
+}
+
+static void apply_param_preset_dump(int16_t v) {
+  preset_store_dump(v);
+}
+
+static void apply_param_cal_dump(int16_t v) {
+  preset_store_cal_dump(v);
+}
+
 // PARAM_DEBUG_COMMAND: bench / debug opcodes for tools/dco_control (Diagnostics + Calibration
 // + Character). See params_def.h near PARAM_DEBUG_COMMAND for the opcode list.
 //
@@ -917,6 +936,10 @@ static const ParamDescriptorT<int16_t> paramTable[] = {
   { PARAM_MANUAL_CALIBRATION_OFFSET, apply_param_manual_calibration_offset },
   { PARAM_GAP_FROM_DCO,              apply_param_gap_from_dco },
   { PARAM_MANUAL_CALIBRATION_STORE,  apply_param_manual_calibration_store },
+  { PARAM_PRESET_SAVE,               apply_param_preset_save },
+  { PARAM_PRESET_LOAD,               apply_param_preset_load },
+  { PARAM_PRESET_DUMP,               apply_param_preset_dump },
+  { PARAM_CAL_DUMP,                  apply_param_cal_dump },
   { PARAM_DEBUG_COMMAND,             apply_param_debug_command }
 };
 
@@ -931,6 +954,8 @@ void init_param_router() {
 
 // Public entry point: called from Serial/MIDI/UI code.
 inline void update_parameters(uint16_t paramNumber, int16_t paramValue) {
+  // Shadow every persistable param so presets can be captured without read-back.
+  preset_shadow_capture(paramNumber, paramValue);
   param_router_apply_jump(paramApplyJump, paramNumber, paramValue);
 }
 

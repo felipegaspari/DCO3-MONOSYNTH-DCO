@@ -39,7 +39,7 @@ constexpr bool kGapPolarityInverted    = false;  // true if cal pin is inverted 
 // Duty tolerance used when validating PW low/high limits and PW center lock-in.
 // A sample whose duty is within ±kPWLimitDutyTolerance of the target
 // low/center/high duty is considered "in tolerance".
-constexpr double kPWLimitDutyTolerance = 0.01;  // ±5%
+constexpr double kPWLimitDutyTolerance = 0.01;  // ±1% duty
 
 #endif  // __AUTOTUNE_CONSTANTS_H__
 

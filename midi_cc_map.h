@@ -2,7 +2,7 @@
 #define __MIDI_CC_MAP_H__
 
 // GENERATED FILE - do not edit.
-// Emitted by tools/dco_control/gen_midi_map.py from tools/dco_control/params.py.
+// Emitted by DCO-CONTROL-PANEL/gen_midi_map.py from DCO-CONTROL-PANEL/params.py.
 // Re-run that script after changing params.py; see docs/MIDI_CC_MAP.md for the chart.
 //
 // cc, target, lo, hi, curve. CC 0 lands on lo and CC 127 on hi; targets at or above

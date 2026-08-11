@@ -37,6 +37,12 @@ void serial_send_adsr_vcf_block_to_mb() {
     ADSR_VCF_attack, ADSR_VCF_decay, ADSR_VCF_sustain, ADSR_VCF_release);
 }
 
+void serial_send_adsr_dco_block_to_mb() {
+  serial_send_adsr_block_to_mb(
+    INPUT_CMD_ADSR3_BLOCK,
+    ADSR1_attack, ADSR1_decay, ADSR1_sustain, ADSR1_release);
+}
+
 void serial_send_filter_block_to_mb() {
   if (Serial2.availableForWrite() < 1) return;
   uint8_t payload[INPUT_SERIAL_LEN_FILTER_BLOCK];
@@ -45,6 +51,12 @@ void serial_send_filter_block_to_mb() {
   encode_u16_le(payload + 4, (uint16_t)ADSR2toVCF);
   encode_u16_le(payload + 6, LFO2toVCF);
   serial_frame_write(Serial2, INPUT_CMD_FILTER_BLOCK, payload, INPUT_SERIAL_LEN_FILTER_BLOCK);
+}
+
+void serial_send_preset_loaded_to_mb(uint8_t slot) {
+  if (Serial2.availableForWrite() < 1) return;
+  uint8_t payload[INPUT_SERIAL_LEN_PRESET_LOADED] = { slot };
+  serial_frame_write(Serial2, INPUT_CMD_PRESET_LOADED, payload, INPUT_SERIAL_LEN_PRESET_LOADED);
 }
 
 static void input_handle_adsr1(char, const uint8_t* payload, uint8_t len) {
@@ -124,81 +136,8 @@ static void input_handle_filter_block(char, const uint8_t* payload, uint8_t len)
   serial_forward_input_block_to_mb(INPUT_CMD_FILTER_BLOCK, payload, len);
 }
 
-static bool param_is_persistable(uint8_t id) {
-  if (id >= (uint8_t)PARAM_MOD_SLOT0_SOURCE && id <= (uint8_t)PARAM_MOD_SLOT7_DEPTH) {
-    return true;
-  }
-  if (id >= (uint8_t)PARAM_LFO1_TO_OSC1 && id <= (uint8_t)PARAM_ADSR3_PITCH_MODE) {
-    return true;
-  }
-  // Both subs' divide / master / phase / width, plus the logic combiner (90..99). 98 is
-  // reserved and simply never arrives; 100 is reserved too and is left out of the range.
-  if (id >= (uint8_t)PARAM_SUB1_DIVIDE && id <= (uint8_t)PARAM_SUB_LOGIC_OP) {
-    return true;
-  }
-  switch (id) {
-    case PARAM_OSC1_SAW_ENABLE:
-    case PARAM_OSC1_PULSE_ENABLE:
-    case PARAM_OSC1_TRI_ENABLE:
-    case PARAM_RESONANCE_COMPENSATION:
-    case PARAM_VCA_ADSR_RESTART:
-    case PARAM_VCF_ADSR_RESTART:
-    case PARAM_ADSR3_TO_OSC_SELECT:
-    case PARAM_LFO1_WAVEFORM:
-    case PARAM_LFO2_WAVEFORM:
-    case PARAM_OSC1_INTERVAL:
-    case PARAM_OSC2_INTERVAL:
-    case PARAM_OSC2_DETUNE_VAL:
-    case PARAM_LFO2_TO_OSC2:
-    case PARAM_OSC_SYNC_MODE:
-    case PARAM_PORTAMENTO_TIME:
-    case PARAM_VCF_KEYTRACK:
-    case PARAM_VELOCITY_TO_VCF:
-    case PARAM_VELOCITY_TO_VCA:
-    case PARAM_OSC1_LEVEL:
-    case PARAM_OSC2_LEVEL:
-    case PARAM_SUB_LEVEL:
-    case PARAM_OSC3_LEVEL:
-    case PARAM_VOICE_MODE:
-    case PARAM_UNISON_DETUNE:
-    case PARAM_ANALOG_DRIFT_AMOUNT:
-    case PARAM_ANALOG_DRIFT_SPEED:
-    case PARAM_ANALOG_DRIFT_SPREAD:
-    case PARAM_SYNC_MODE:
-    case PARAM_PORTAMENTO_MODE:
-    case PARAM_OSC3_INTERVAL:
-    case PARAM_OSC3_DETUNE_VAL:
-    case PARAM_LFO2_TO_OSC3:
-    case PARAM_SOFT_SYNC:
-    case PARAM_SUBOSC_DIVIDE:
-    case PARAM_LFO1_TO_DCO:
-    case PARAM_LFO1_SPEED:
-    case PARAM_LFO2_SPEED:
-    case PARAM_VCA_LEVEL:
-    case PARAM_LFO1_TO_VCA:
-    case PARAM_LFO2_TO_PW:
-    case PARAM_ADSR3_TO_PWM:
-    case PARAM_ADSR3_TO_DETUNE1:
-    case PARAM_ADSR1_ATTACK_CURVE:
-    case PARAM_ADSR1_DECAY_CURVE:
-    case PARAM_ADSR2_ATTACK_CURVE:
-    case PARAM_ADSR2_DECAY_CURVE:
-    case PARAM_DIST_DRIVE:
-    case PARAM_DIST_MIX:
-    case PARAM_FILTER_MODE:
-    case PARAM_OSC2_SAW_ENABLE:
-    case PARAM_OSC2_PULSE_ENABLE:
-    case PARAM_OSC2_TRI_ENABLE:
-    case PARAM_OSC3_SAW_ENABLE:
-    case PARAM_OSC3_PULSE_ENABLE:
-    case PARAM_OSC3_TRI_ENABLE:
-    case PARAM_ADSR3_ENABLED:
-    case PARAM_PW_VALUE:
-      return true;
-    default:
-      return false;
-  }
-}
+// The persistable patch-param set lives in preset_store.h now
+// (preset_param_is_persistable), shared with the preset shadow capture.
 
 void serialSendParam16(byte paramNumber, int16_t paramValue) {
   if (Serial2.availableForWrite() < 1) {
@@ -210,7 +149,7 @@ void serialSendParam16(byte paramNumber, int16_t paramValue) {
 }
 
 void serial_echo_persistable_param16(uint8_t id, int16_t value) {
-  if (!param_is_persistable(id)) {
+  if (!preset_param_is_persistable(id)) {
     return;
   }
   serialSendParam16(id, value);
@@ -228,9 +167,23 @@ static void input_handle_param16(char, const uint8_t* payload, uint8_t len) {
 
 static void input_handle_preset_name(char, const uint8_t* payload, uint8_t len) {
   if (len != INPUT_SERIAL_LEN_PRESET_NAME) return;
-  for (int i = 0; i < 8; ++i) {
+  for (int i = 0; i < 16; ++i) {
     presetName[i] = payload[i];
   }
+}
+
+// Bulk restore staging ('B') and commit ('C') → preset_store.ino.
+static void input_handle_bulk_chunk(char, const uint8_t* payload, uint8_t len) {
+  preset_bulk_chunk(payload, len);
+}
+
+static void input_handle_bulk_commit(char, const uint8_t* payload, uint8_t len) {
+  preset_bulk_commit(payload, len);
+}
+
+// 'N': Input asking for the whole preset directory → preset_store.ino.
+static void input_handle_preset_dir_request(char, const uint8_t*, uint8_t) {
+  preset_store_send_directory_to_mb();
 }
 
 static const SerialCommandDef inputSerialCommands[] = {
@@ -240,6 +193,9 @@ static const SerialCommandDef inputSerialCommands[] = {
   { INPUT_CMD_FILTER_BLOCK,  INPUT_SERIAL_LEN_FILTER_BLOCK, input_handle_filter_block },
   { INPUT_CMD_PARAM_16,      INPUT_SERIAL_LEN_PARAM_16,     input_handle_param16      },
   { INPUT_CMD_PRESET_NAME,   INPUT_SERIAL_LEN_PRESET_NAME,  input_handle_preset_name  },
+  { INPUT_CMD_BULK_CHUNK,    INPUT_SERIAL_LEN_BULK_CHUNK,   input_handle_bulk_chunk   },
+  { INPUT_CMD_BULK_COMMIT,   INPUT_SERIAL_LEN_BULK_COMMIT,  input_handle_bulk_commit  },
+  { INPUT_CMD_PRESET_DIR_REQUEST, INPUT_SERIAL_LEN_PRESET_DIR_REQUEST, input_handle_preset_dir_request },
 };
 
 static SerialCommandTable inputSerialLut;

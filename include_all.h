@@ -25,6 +25,7 @@
 #include "cv_out.h"
 
 #include "FS.h"
+#include "preset_store.h"
 
 #include "noteList.h"
 #include "amp_comp.h"
@@ -46,7 +47,6 @@
 #include "wave_mux.h"
 #include "mod_matrix.h"
 
-#include "PID.h"
 #include "autotune.h"
 
 #endif
