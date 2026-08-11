@@ -41,6 +41,7 @@ Vendored Arduino libraries used by the build (passed via `--libraries ./_build_l
 
 | Library | Path | Notes |
 |---------|------|--------|
+| `DCO-PROTOCOL` | `_build_libs/DCO-PROTOCOL` → `../../DCO-PROTOCOL` | Shared `params_def.h` / serial headers. Sketch-root shims (`params_def.h`, etc.) `#include` the real files so Arduino IDE finds them without `--libraries`. |
 | `ADSR_Bezier` | `_build_libs/ADSR_Bezier` → `../../ADSR_Bezier` | Symlink to monorepo root; track **`main`**. Toggle math backend in [`adsr.h`](adsr.h) via `ADSR_BEZIER_USE_FLOAT` (default `0` = fixed-point). |
 | `DCO_Noise` | `_build_libs/DCO_Noise` → `../../DCO_Noise` | Symlink to monorepo root; noise engines (`begin`/`next`). Fleet size in [`noise.h`](noise.h). |
 | `mo-lfo` | `_build_libs/mo-lfo` → `../../mo-lfo` | Symlink to monorepo root. Isolated like ADSR: `LFO.h` includes the header via `_build_libs/...`; `LFO.ino` `#include`s `mo-lfo.cpp` so Arduino IDE links it (no sketchbook library). |
