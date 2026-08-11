@@ -63,14 +63,21 @@ EnvVCA (ADSR1) and EnvVCF (ADSR2) stay on fixed buses only.
 | 7 | VCF cutoff | RP2350 | Add to shared `CUTOFF` sum → both filter cutoff paths |
 | 8 | Dist Mix | RP2040 aux / solo DCO | Add to panel `DIST_MIX` |
 | 9 | Pitch | RP2350 / DCO voice | Shared OSC1/2/3; Q24 octave-fraction into `modifiersBase` (with pitch bend). **Depth ±1023 → ±1.0 oct** (clamped); dual-bus with `LFO1toDCO` / EnvDCO |
-| 10 | Sub phase | RP2350 (`ENABLE_SUBOSC_ENGINE2`) | All three subs; matrix ±1023 → one master period of phase (wraps). Inert without engine2 |
-| 11 | Sub pulse width | RP2350 (`ENABLE_SUBOSC_ENGINE2`) | All three subs; matrix ±1023 → full duty range (clamps 1..255). Inert without engine2 |
+| 10 | Sub phase | RP2350 (`ENABLE_SUBOSC_ENGINE2`) | Sub 2 only; matrix ±1023 → one master period of phase (wraps). Inert without engine2 |
+| 11 | Sub pulse width | RP2350 (`ENABLE_SUBOSC_ENGINE2`) | Sub 2 only; matrix ±1023 → full duty range (clamps 1..255). Inert without engine2 |
 
 Pitch is latched from `dest_sums[9]` in `update_CV_outs()` → `matrix_pitch_mod_q24`; not applied via `mod_matrix_apply_cv`.
 
 Sub phase / PW are **not** written through `mod_matrix_apply_cv`. `mod_matrix_eval_subosc()`
 (called from `subosc2_update_periods()` each control frame) accumulates only those slots into
 `subosc_mod_phase` / `subosc_mod_pw`, so they still work when `ENABLE_CV_OUTS` is off.
+
+Both offsets land on **sub 2 alone**, which is deliberate rather than a simplification. The pad
+that gets mixed is the logic combiner's output, and an equal phase or duty offset on both subs
+maps back to exactly the waveform the combiner was already producing — the modulation would be
+inaudible where it counts. One-sided, the same sweep walks sub 2 through sub 1 and the combined
+shape changes continuously. Sub 1's phase and width are the static reference the sweep is
+measured against ([`PIO_OSCILLATORS.md`](PIO_OSCILLATORS.md) §9.2).
 
 ---
 

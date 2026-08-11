@@ -296,13 +296,14 @@ void pio_solve_period_model(uint32_t clk_div_a, double measured_hz_a,
 // (Re)configure the sub-oscillator. divide 0 stops it, 2 and 4 give a square one and
 // two octaves below OSC1. Needs SUBOSC_PIN wired to a mixer input to be audible.
 //
-// With ENABLE_SUBOSC_ENGINE2 there is one sub per oscillator and this legacy entry point
-// (PARAM_SUBOSC_DIVIDE, which predates the per-oscillator parameters) sets the same ratio on
-// all three. Subs whose pin is still unwired stay stopped either way.
+// With ENABLE_SUBOSC_ENGINE2 there are two subs and this legacy entry point
+// (PARAM_SUBOSC_DIVIDE, which predates the per-sub parameters) sets the same ratio on both, so
+// that one control still gives an audible sub through the combiner's pass-through operators.
+// Subs whose pin is still unwired stay stopped either way.
 void set_subosc_divide(uint8_t divide) {
 #ifdef ENABLE_SUBOSC_ENGINE2
-  for (uint8_t osc = 0; osc < NUM_OSCILLATORS; osc++) {
-    subosc2_set_divide(osc, divide);
+  for (uint8_t sub = 0; sub < SUBOSC_COUNT; sub++) {
+    subosc2_set_divide(sub, divide);
   }
   return;
 #else
@@ -344,21 +345,17 @@ static constexpr uint8_t PIO_DEFER_RESET  = 1u << 1;
 static constexpr uint8_t PIO_DEFER_SUBOSC = 1u << 2;
 static constexpr uint8_t PIO_DEFER_PROBE  = 1u << 3;
 #ifdef ENABLE_SUBOSC_ENGINE2
-// Per-oscillator sub divides need one pending value each, plus a bit saying which arrived:
-// three sliders can move between two services and none of them should be lost.
+// Per-sub divides and masters need one pending value each, plus a bit saying which arrived:
+// several controls can move between two services and none of them should be lost.
 static constexpr uint8_t PIO_DEFER_SUBOSC2 = 1u << 4;
-static volatile uint8_t pio_defer_subosc2_divide[NUM_OSCILLATORS] = { 0, 0, 0 };
+static volatile uint8_t pio_defer_subosc2_divide[SUBOSC_COUNT] = { 0, 0 };
 static volatile uint8_t pio_defer_subosc2_mask = 0;
-// The combiner's operator and input pair are applied together, so both pending values live
-// here: core 0 can then set one without reading back the other from a global core 1 owns.
-// Both start where subOscLogicOp / subOscLogicPair do.
+static constexpr uint8_t PIO_DEFER_SUBOSC_MASTER = 1u << 6;
+static volatile uint8_t pio_defer_subosc_master[SUBOSC_COUNT] = { 0, 0 };
+static volatile uint8_t pio_defer_subosc_master_mask = 0;
+// The combiner is one value now that the pair is fixed at SUBOSC_PINS[0]/[1].
 static constexpr uint8_t PIO_DEFER_SUBOSC_LOGIC = 1u << 5;
 static volatile uint8_t pio_defer_subosc_logic_op = 0;
-static volatile uint8_t pio_defer_subosc_logic_pair = SUBOSC_LOGIC_PAIR_DEFAULT;
-// The per-voice master combine rewrites six words of the segment program's instruction
-// memory, which is core 1's to touch.
-static constexpr uint8_t PIO_DEFER_SUBOSC_MASTER = 1u << 6;
-static volatile uint8_t pio_defer_subosc_master_op = 0;
 #endif
 
 void setSyncMode();  // voices.ino — must run on core 1 only
@@ -378,32 +375,30 @@ void pio_defer_request_subosc(uint8_t divide) {
 }
 
 #ifdef ENABLE_SUBOSC_ENGINE2
-void pio_defer_request_subosc_divide(uint8_t osc, uint8_t divide) {
-  if (osc >= NUM_OSCILLATORS) {
+void pio_defer_request_subosc_divide(uint8_t sub, uint8_t divide) {
+  if (sub >= SUBOSC_COUNT) {
     return;
   }
-  pio_defer_subosc2_divide[osc] = divide;
+  pio_defer_subosc2_divide[sub] = divide;
   __dmb();
-  __atomic_fetch_or(&pio_defer_subosc2_mask, (uint8_t)(1u << osc), __ATOMIC_SEQ_CST);
+  __atomic_fetch_or(&pio_defer_subosc2_mask, (uint8_t)(1u << sub), __ATOMIC_SEQ_CST);
   __atomic_fetch_or(&pio_defer_pending, PIO_DEFER_SUBOSC2, __ATOMIC_SEQ_CST);
+}
+
+void pio_defer_request_subosc_master(uint8_t sub, uint8_t osc) {
+  if (sub >= SUBOSC_COUNT) {
+    return;
+  }
+  pio_defer_subosc_master[sub] = osc;
+  __dmb();
+  __atomic_fetch_or(&pio_defer_subosc_master_mask, (uint8_t)(1u << sub), __ATOMIC_SEQ_CST);
+  __atomic_fetch_or(&pio_defer_pending, PIO_DEFER_SUBOSC_MASTER, __ATOMIC_SEQ_CST);
 }
 
 void pio_defer_request_subosc_logic_op(uint8_t op) {
   pio_defer_subosc_logic_op = op;
   __dmb();
   __atomic_fetch_or(&pio_defer_pending, PIO_DEFER_SUBOSC_LOGIC, __ATOMIC_SEQ_CST);
-}
-
-void pio_defer_request_subosc_logic_pair(uint8_t pair) {
-  pio_defer_subosc_logic_pair = pair;
-  __dmb();
-  __atomic_fetch_or(&pio_defer_pending, PIO_DEFER_SUBOSC_LOGIC, __ATOMIC_SEQ_CST);
-}
-
-void pio_defer_request_subosc_master_op(uint8_t op) {
-  pio_defer_subosc_master_op = op;
-  __dmb();
-  __atomic_fetch_or(&pio_defer_pending, PIO_DEFER_SUBOSC_MASTER, __ATOMIC_SEQ_CST);
 }
 #endif
 
@@ -457,17 +452,22 @@ void pio_defer_service() {
 #ifdef ENABLE_SUBOSC_ENGINE2
   if (pending & PIO_DEFER_SUBOSC2) {
     const uint8_t mask = __atomic_exchange_n(&pio_defer_subosc2_mask, 0, __ATOMIC_SEQ_CST);
-    for (uint8_t osc = 0; osc < NUM_OSCILLATORS; osc++) {
-      if (mask & (1u << osc)) {
-        subosc2_set_divide(osc, pio_defer_subosc2_divide[osc]);
+    for (uint8_t sub = 0; sub < SUBOSC_COUNT; sub++) {
+      if (mask & (1u << sub)) {
+        subosc2_set_divide(sub, pio_defer_subosc2_divide[sub]);
+      }
+    }
+  }
+  if (pending & PIO_DEFER_SUBOSC_MASTER) {
+    const uint8_t mask = __atomic_exchange_n(&pio_defer_subosc_master_mask, 0, __ATOMIC_SEQ_CST);
+    for (uint8_t sub = 0; sub < SUBOSC_COUNT; sub++) {
+      if (mask & (1u << sub)) {
+        subosc2_set_master(sub, pio_defer_subosc_master[sub]);
       }
     }
   }
   if (pending & PIO_DEFER_SUBOSC_LOGIC) {
-    subosc2_set_logic(pio_defer_subosc_logic_op, pio_defer_subosc_logic_pair);
-  }
-  if (pending & PIO_DEFER_SUBOSC_MASTER) {
-    subosc2_set_master_op(pio_defer_subosc_master_op);
+    subosc2_set_logic(pio_defer_subosc_logic_op);
   }
 #endif
   if (pending & PIO_DEFER_PROBE) {

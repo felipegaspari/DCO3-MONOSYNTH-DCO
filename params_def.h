@@ -144,41 +144,38 @@ enum ParamId : uint16_t {
   PARAM_OSC3_PULSE_ENABLE        = 88,
   PARAM_OSC3_TRI_ENABLE          = 89,
 
-  // --- Per-oscillator sub-oscillators (ENABLE_SUBOSC_ENGINE2; RP2350 only) ------------
-  // See docs/PIO_OSCILLATORS.md section 9. On builds without the engine, SUB1_DIVIDE falls
-  // back to the single legacy sub (same as PARAM_SUBOSC_DIVIDE) and the rest are ignored.
+  // --- Sub-oscillators (ENABLE_SUBOSC_ENGINE2; RP2350 only) ---------------------------
+  // Two subs, and the boolean combination of them is the output that gets mixed. See
+  // docs/PIO_OSCILLATORS.md section 9. On builds without the engine, SUB1_DIVIDE falls back to
+  // the single legacy sub (same as PARAM_SUBOSC_DIVIDE) and the rest are ignored.
   //
   // Divide: 0 = off, 1 = master rate (phase / PWM only), 2..8 master periods per sub period.
   // Odd ratios are legal and give non-octave subharmonics (3 = an octave and a fifth down).
   PARAM_SUB1_DIVIDE              = 90,
   PARAM_SUB2_DIVIDE              = 91,
-  PARAM_SUB3_DIVIDE              = 92,
+  // Master: which oscillator's reset the sub locks to, 0..2 = OSC1..OSC3. Both subs on one
+  // master gives harmonic pulse patterns; different masters gives ring-mod beating that tracks
+  // their detune. 92 and 95 were the third sub's divide and phase, which never shipped.
+  PARAM_SUB1_MASTER              = 92,
+  PARAM_SUB2_MASTER              = 95,
   // Phase: rising-edge delay after the master's reset, 0..359 degrees of the *master* period
   // (shifting a sub by whole master periods is inaudible, so that is the useful range).
   PARAM_SUB1_PHASE               = 93,
   PARAM_SUB2_PHASE               = 94,
-  PARAM_SUB3_PHASE               = 95,
   // Width: duty in 1/256ths of the sub period, 1..255. 128 = the classic 50% square.
   PARAM_SUB1_WIDTH               = 96,
   PARAM_SUB2_WIDTH               = 97,
-  PARAM_SUB3_WIDTH               = 98,
-  // Boolean logic combiner: two sub outputs into one, digital ring modulation.
-  // Operator: 0 = off, 1 = XOR, 2 = AND, 3 = OR, 4 = XNOR, 5 = NAND, 6 = NOR.
-  // Pair: 0 = subs 1+2, 1 = subs 1+3, 2 = subs 2+3. Needs the two subs on adjacent GPIOs
-  // and a third pad for the result; the combiner reports and stays off otherwise.
+  // 98 and 100 are reserved: they were the third sub's width and the combiner's pair selector,
+  // and the pair is fixed now that there are exactly two subs on adjacent pads.
+  //
+  // Boolean logic combiner: both subs in, one square out. Digital ring modulation, plus two
+  // pass-throughs so this one pad carries everything the sub section can produce.
+  // 0 = off, 1 = XOR, 2 = AND, 3 = OR, 4 = XNOR, 5 = NAND, 6 = NOR, 7 = sub 1, 8 = sub 2.
   PARAM_SUB_LOGIC_OP             = 99,
-  PARAM_SUB_LOGIC_PAIR           = 100,
 
   // --- Misc / control / UI flags ------------------------------------
   // Calibration mode selector (screen/UI only for now)
   PARAM_CALIBRATION_MODE         = 101,
-
-  // Per-voice master combine: every sub pad carries `sub OP master`, master being that
-  // oscillator's own reset pulse. 0 = plain sub (the square the engine made before this
-  // existed), 1 = XOR, 2 = AND, 3 = OR, 4 = XNOR, 5 = NAND, 6 = NOR. One shared pio2 program
-  // image, so the operator is global across the three voices. Ignored without the engine.
-  // Sits here rather than beside 90..100 because 101 was already taken.
-  PARAM_SUB_MASTER_OP            = 102,
 
   // Global/manual control flags (input+screen; DCO may ignore)
   PARAM_FADERS_CONTROL_MANUAL    = 120,

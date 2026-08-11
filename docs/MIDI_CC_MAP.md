@@ -135,7 +135,7 @@ These parameters take discrete values; the CC number to send is the value itself
 - **CC 21, Soft sync**: 0 - hard sync (cap only) = 0, 1 - soft ~40% window = 1, 2 - soft ~67% window = 2, 3 - soft ~86% window = 3
   - 0 = hard sync (sideset); 1..3 = soft sync trailing polled chunks
 - **CC 22, Sub-oscillator divide**: Off = 0, Divide by 2 = 2, Divide by 4 = 4
-  - output on GP8, needs a mixer input on the carrier to be audible
+  - the legacy single sub on GP8. On an ENABLE_SUBOSC_ENGINE2 build this sets both subs at once, and the Sub-osc tab is the finer-grained version of it
 - **CC 23, Osc sync / phase align OSC2**: Off - free running (no note-on sync) = 0, Sync at note-on (0 deg) = 1, Sync + 30 deg = 15, Sync + 45 deg = 2, Sync + 60 deg = 30, Sync + 90 deg = 3, Sync + 120 deg = 60, Sync + 135 deg = 4, Sync + 150 deg = 75, Sync + 180 deg = 5, Sync + 210 deg = 105, Sync + 225 deg = 6, Sync + 240 deg = 120, Sync + 270 deg = 7, Sync + 315 deg = 8
   - Off leaves the oscillators running through note-on; every other setting restarts OSC1 and OSC2 together there, the degree entries delaying OSC2's first flyback (EXACT_Y). Changing this retriggers all notes.
   - out of 7-bit reach, use the serial bench app instead: Sync + 300 deg (150), Sync + 330 deg (165)
@@ -153,53 +153,50 @@ These parameters take discrete values; the CC number to send is the value itself
 - **CC 61, LFO2 waveform**: 0 - off = 0, 1 - saw = 1, 2 - triangle = 2, 3 - sine = 3, 4 - square = 4
 - **CC 84, Mod slot 0 source**: 0 ADSR3 (EnvDCO) = 0, 1 ADSR4 (stub) = 1, 2 LFO3 (stub) = 2, 3 LFO4 (stub) = 3, 4 Velocity = 4, 5 Keytrack = 5, 6 Random = 6, 7 Aftertouch = 7, 8 LFO1 = 8, 9 LFO2 = 9, 10 Pitch bend = 10, 11 Mod wheel = 11, 12 Noise 0 = 12, 13 Noise 1 = 13, 14 Noise 2 (reserved) = 14, 15 Noise 3 (reserved) = 15
   - out of 7-bit reach, use the serial bench app instead: Off / empty (255)
-- **CC 85, Mod slot 0 dest**: 0 OSC1 level = 0, 1 OSC2 level = 1, 2 OSC3 level = 2, 3 Sub level = 3, 4 VCF1 reso = 4, 5 VCF2 reso = 5, 6 Dist Drive = 6, 7 VCF cutoff = 7, 8 Dist Mix = 8, 9 Pitch (±1 oct @ ±1023) = 9, 10 Sub phase (all subs) = 10, 11 Sub pulse width (all subs) = 11
+- **CC 85, Mod slot 0 dest**: 0 OSC1 level = 0, 1 OSC2 level = 1, 2 OSC3 level = 2, 3 Sub level = 3, 4 VCF1 reso = 4, 5 VCF2 reso = 5, 6 Dist Drive = 6, 7 VCF cutoff = 7, 8 Dist Mix = 8, 9 Pitch (±1 oct @ ±1023) = 9, 10 Sub phase (sub 2) = 10, 11 Sub pulse width (sub 2) = 11
   - out of 7-bit reach, use the serial bench app instead: Off / empty (255)
 - **CC 87, Mod slot 1 source**: 0 ADSR3 (EnvDCO) = 0, 1 ADSR4 (stub) = 1, 2 LFO3 (stub) = 2, 3 LFO4 (stub) = 3, 4 Velocity = 4, 5 Keytrack = 5, 6 Random = 6, 7 Aftertouch = 7, 8 LFO1 = 8, 9 LFO2 = 9, 10 Pitch bend = 10, 11 Mod wheel = 11, 12 Noise 0 = 12, 13 Noise 1 = 13, 14 Noise 2 (reserved) = 14, 15 Noise 3 (reserved) = 15
   - out of 7-bit reach, use the serial bench app instead: Off / empty (255)
-- **CC 88, Mod slot 1 dest**: 0 OSC1 level = 0, 1 OSC2 level = 1, 2 OSC3 level = 2, 3 Sub level = 3, 4 VCF1 reso = 4, 5 VCF2 reso = 5, 6 Dist Drive = 6, 7 VCF cutoff = 7, 8 Dist Mix = 8, 9 Pitch (±1 oct @ ±1023) = 9, 10 Sub phase (all subs) = 10, 11 Sub pulse width (all subs) = 11
+- **CC 88, Mod slot 1 dest**: 0 OSC1 level = 0, 1 OSC2 level = 1, 2 OSC3 level = 2, 3 Sub level = 3, 4 VCF1 reso = 4, 5 VCF2 reso = 5, 6 Dist Drive = 6, 7 VCF cutoff = 7, 8 Dist Mix = 8, 9 Pitch (±1 oct @ ±1023) = 9, 10 Sub phase (sub 2) = 10, 11 Sub pulse width (sub 2) = 11
   - out of 7-bit reach, use the serial bench app instead: Off / empty (255)
 - **CC 90, Mod slot 2 source**: 0 ADSR3 (EnvDCO) = 0, 1 ADSR4 (stub) = 1, 2 LFO3 (stub) = 2, 3 LFO4 (stub) = 3, 4 Velocity = 4, 5 Keytrack = 5, 6 Random = 6, 7 Aftertouch = 7, 8 LFO1 = 8, 9 LFO2 = 9, 10 Pitch bend = 10, 11 Mod wheel = 11, 12 Noise 0 = 12, 13 Noise 1 = 13, 14 Noise 2 (reserved) = 14, 15 Noise 3 (reserved) = 15
   - out of 7-bit reach, use the serial bench app instead: Off / empty (255)
-- **CC 91, Mod slot 2 dest**: 0 OSC1 level = 0, 1 OSC2 level = 1, 2 OSC3 level = 2, 3 Sub level = 3, 4 VCF1 reso = 4, 5 VCF2 reso = 5, 6 Dist Drive = 6, 7 VCF cutoff = 7, 8 Dist Mix = 8, 9 Pitch (±1 oct @ ±1023) = 9, 10 Sub phase (all subs) = 10, 11 Sub pulse width (all subs) = 11
+- **CC 91, Mod slot 2 dest**: 0 OSC1 level = 0, 1 OSC2 level = 1, 2 OSC3 level = 2, 3 Sub level = 3, 4 VCF1 reso = 4, 5 VCF2 reso = 5, 6 Dist Drive = 6, 7 VCF cutoff = 7, 8 Dist Mix = 8, 9 Pitch (±1 oct @ ±1023) = 9, 10 Sub phase (sub 2) = 10, 11 Sub pulse width (sub 2) = 11
   - out of 7-bit reach, use the serial bench app instead: Off / empty (255)
 - **CC 93, Mod slot 3 source**: 0 ADSR3 (EnvDCO) = 0, 1 ADSR4 (stub) = 1, 2 LFO3 (stub) = 2, 3 LFO4 (stub) = 3, 4 Velocity = 4, 5 Keytrack = 5, 6 Random = 6, 7 Aftertouch = 7, 8 LFO1 = 8, 9 LFO2 = 9, 10 Pitch bend = 10, 11 Mod wheel = 11, 12 Noise 0 = 12, 13 Noise 1 = 13, 14 Noise 2 (reserved) = 14, 15 Noise 3 (reserved) = 15
   - out of 7-bit reach, use the serial bench app instead: Off / empty (255)
-- **CC 94, Mod slot 3 dest**: 0 OSC1 level = 0, 1 OSC2 level = 1, 2 OSC3 level = 2, 3 Sub level = 3, 4 VCF1 reso = 4, 5 VCF2 reso = 5, 6 Dist Drive = 6, 7 VCF cutoff = 7, 8 Dist Mix = 8, 9 Pitch (±1 oct @ ±1023) = 9, 10 Sub phase (all subs) = 10, 11 Sub pulse width (all subs) = 11
+- **CC 94, Mod slot 3 dest**: 0 OSC1 level = 0, 1 OSC2 level = 1, 2 OSC3 level = 2, 3 Sub level = 3, 4 VCF1 reso = 4, 5 VCF2 reso = 5, 6 Dist Drive = 6, 7 VCF cutoff = 7, 8 Dist Mix = 8, 9 Pitch (±1 oct @ ±1023) = 9, 10 Sub phase (sub 2) = 10, 11 Sub pulse width (sub 2) = 11
   - out of 7-bit reach, use the serial bench app instead: Off / empty (255)
 - **CC 96, Mod slot 4 source**: 0 ADSR3 (EnvDCO) = 0, 1 ADSR4 (stub) = 1, 2 LFO3 (stub) = 2, 3 LFO4 (stub) = 3, 4 Velocity = 4, 5 Keytrack = 5, 6 Random = 6, 7 Aftertouch = 7, 8 LFO1 = 8, 9 LFO2 = 9, 10 Pitch bend = 10, 11 Mod wheel = 11, 12 Noise 0 = 12, 13 Noise 1 = 13, 14 Noise 2 (reserved) = 14, 15 Noise 3 (reserved) = 15
   - out of 7-bit reach, use the serial bench app instead: Off / empty (255)
-- **CC 97, Mod slot 4 dest**: 0 OSC1 level = 0, 1 OSC2 level = 1, 2 OSC3 level = 2, 3 Sub level = 3, 4 VCF1 reso = 4, 5 VCF2 reso = 5, 6 Dist Drive = 6, 7 VCF cutoff = 7, 8 Dist Mix = 8, 9 Pitch (±1 oct @ ±1023) = 9, 10 Sub phase (all subs) = 10, 11 Sub pulse width (all subs) = 11
+- **CC 97, Mod slot 4 dest**: 0 OSC1 level = 0, 1 OSC2 level = 1, 2 OSC3 level = 2, 3 Sub level = 3, 4 VCF1 reso = 4, 5 VCF2 reso = 5, 6 Dist Drive = 6, 7 VCF cutoff = 7, 8 Dist Mix = 8, 9 Pitch (±1 oct @ ±1023) = 9, 10 Sub phase (sub 2) = 10, 11 Sub pulse width (sub 2) = 11
   - out of 7-bit reach, use the serial bench app instead: Off / empty (255)
 - **CC 103, Mod slot 5 source**: 0 ADSR3 (EnvDCO) = 0, 1 ADSR4 (stub) = 1, 2 LFO3 (stub) = 2, 3 LFO4 (stub) = 3, 4 Velocity = 4, 5 Keytrack = 5, 6 Random = 6, 7 Aftertouch = 7, 8 LFO1 = 8, 9 LFO2 = 9, 10 Pitch bend = 10, 11 Mod wheel = 11, 12 Noise 0 = 12, 13 Noise 1 = 13, 14 Noise 2 (reserved) = 14, 15 Noise 3 (reserved) = 15
   - out of 7-bit reach, use the serial bench app instead: Off / empty (255)
-- **CC 104, Mod slot 5 dest**: 0 OSC1 level = 0, 1 OSC2 level = 1, 2 OSC3 level = 2, 3 Sub level = 3, 4 VCF1 reso = 4, 5 VCF2 reso = 5, 6 Dist Drive = 6, 7 VCF cutoff = 7, 8 Dist Mix = 8, 9 Pitch (±1 oct @ ±1023) = 9, 10 Sub phase (all subs) = 10, 11 Sub pulse width (all subs) = 11
+- **CC 104, Mod slot 5 dest**: 0 OSC1 level = 0, 1 OSC2 level = 1, 2 OSC3 level = 2, 3 Sub level = 3, 4 VCF1 reso = 4, 5 VCF2 reso = 5, 6 Dist Drive = 6, 7 VCF cutoff = 7, 8 Dist Mix = 8, 9 Pitch (±1 oct @ ±1023) = 9, 10 Sub phase (sub 2) = 10, 11 Sub pulse width (sub 2) = 11
   - out of 7-bit reach, use the serial bench app instead: Off / empty (255)
 - **CC 106, Mod slot 6 source**: 0 ADSR3 (EnvDCO) = 0, 1 ADSR4 (stub) = 1, 2 LFO3 (stub) = 2, 3 LFO4 (stub) = 3, 4 Velocity = 4, 5 Keytrack = 5, 6 Random = 6, 7 Aftertouch = 7, 8 LFO1 = 8, 9 LFO2 = 9, 10 Pitch bend = 10, 11 Mod wheel = 11, 12 Noise 0 = 12, 13 Noise 1 = 13, 14 Noise 2 (reserved) = 14, 15 Noise 3 (reserved) = 15
   - out of 7-bit reach, use the serial bench app instead: Off / empty (255)
-- **CC 107, Mod slot 6 dest**: 0 OSC1 level = 0, 1 OSC2 level = 1, 2 OSC3 level = 2, 3 Sub level = 3, 4 VCF1 reso = 4, 5 VCF2 reso = 5, 6 Dist Drive = 6, 7 VCF cutoff = 7, 8 Dist Mix = 8, 9 Pitch (±1 oct @ ±1023) = 9, 10 Sub phase (all subs) = 10, 11 Sub pulse width (all subs) = 11
+- **CC 107, Mod slot 6 dest**: 0 OSC1 level = 0, 1 OSC2 level = 1, 2 OSC3 level = 2, 3 Sub level = 3, 4 VCF1 reso = 4, 5 VCF2 reso = 5, 6 Dist Drive = 6, 7 VCF cutoff = 7, 8 Dist Mix = 8, 9 Pitch (±1 oct @ ±1023) = 9, 10 Sub phase (sub 2) = 10, 11 Sub pulse width (sub 2) = 11
   - out of 7-bit reach, use the serial bench app instead: Off / empty (255)
 - **CC 109, Mod slot 7 source**: 0 ADSR3 (EnvDCO) = 0, 1 ADSR4 (stub) = 1, 2 LFO3 (stub) = 2, 3 LFO4 (stub) = 3, 4 Velocity = 4, 5 Keytrack = 5, 6 Random = 6, 7 Aftertouch = 7, 8 LFO1 = 8, 9 LFO2 = 9, 10 Pitch bend = 10, 11 Mod wheel = 11, 12 Noise 0 = 12, 13 Noise 1 = 13, 14 Noise 2 (reserved) = 14, 15 Noise 3 (reserved) = 15
   - out of 7-bit reach, use the serial bench app instead: Off / empty (255)
-- **CC 110, Mod slot 7 dest**: 0 OSC1 level = 0, 1 OSC2 level = 1, 2 OSC3 level = 2, 3 Sub level = 3, 4 VCF1 reso = 4, 5 VCF2 reso = 5, 6 Dist Drive = 6, 7 VCF cutoff = 7, 8 Dist Mix = 8, 9 Pitch (±1 oct @ ±1023) = 9, 10 Sub phase (all subs) = 10, 11 Sub pulse width (all subs) = 11
+- **CC 110, Mod slot 7 dest**: 0 OSC1 level = 0, 1 OSC2 level = 1, 2 OSC3 level = 2, 3 Sub level = 3, 4 VCF1 reso = 4, 5 VCF2 reso = 5, 6 Dist Drive = 6, 7 VCF cutoff = 7, 8 Dist Mix = 8, 9 Pitch (±1 oct @ ±1023) = 9, 10 Sub phase (sub 2) = 10, 11 Sub pulse width (sub 2) = 11
   - out of 7-bit reach, use the serial bench app instead: Off / empty (255)
 
 ## Deliberately not mapped
 
-Every non-reserved 7-bit controller is already assigned (0 free). Sub-oscillator ParamIds 90–100 and LFO2→OSC3 coarse therefore stay panel/serial only; continuous sub shape still reaches the board through mod-matrix destinations 10/11 (`MOD_DEST_SUB_PHASE` / `MOD_DEST_SUB_PW`).
+Every non-reserved 7-bit controller is already assigned (0 free). Sub-oscillator ParamIds 90–99 and LFO2→OSC3 coarse therefore stay panel/serial only; continuous sub shape still reaches the board through mod-matrix destinations 10/11 (`MOD_DEST_SUB_PHASE` / `MOD_DEST_SUB_PW`, which land on sub 2).
 
-- **Combine with own osc** (parameter 102)
 - **Sub 1 divide** (parameter 90)
+- **Sub 1 master** (parameter 92)
 - **Sub 1 phase** (parameter 93)
 - **Sub 1 width** (parameter 96)
 - **Sub 2 divide** (parameter 91)
+- **Sub 2 master** (parameter 95)
 - **Sub 2 phase** (parameter 94)
 - **Sub 2 width** (parameter 97)
-- **Sub 3 divide** (parameter 92)
-- **Sub 3 phase** (parameter 95)
-- **Sub 3 width** (parameter 98)
 - **Logic combiner** (parameter 99)
-- **Logic combiner inputs** (parameter 100)
 - **EnvDCO pitch centered** (parameter 223)
 - **LFO2 to OSC3 coarse** (parameter 220)
 - **Character** (parameter 221)

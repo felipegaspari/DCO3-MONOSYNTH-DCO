@@ -131,13 +131,12 @@ static bool param_is_persistable(uint8_t id) {
   if (id >= (uint8_t)PARAM_LFO1_TO_OSC1 && id <= (uint8_t)PARAM_ADSR3_PITCH_MODE) {
     return true;
   }
-  // Sub-oscillator divide / phase / width, three of each, plus the logic combiner (90..100).
-  if (id >= (uint8_t)PARAM_SUB1_DIVIDE && id <= (uint8_t)PARAM_SUB_LOGIC_PAIR) {
+  // Both subs' divide / master / phase / width, plus the logic combiner (90..99). 98 is
+  // reserved and simply never arrives; 100 is reserved too and is left out of the range.
+  if (id >= (uint8_t)PARAM_SUB1_DIVIDE && id <= (uint8_t)PARAM_SUB_LOGIC_OP) {
     return true;
   }
   switch (id) {
-    // Not folded into the range above: 101 sits between them and is a UI mode, not a patch.
-    case PARAM_SUB_MASTER_OP:
     case PARAM_OSC1_SAW_ENABLE:
     case PARAM_OSC1_PULSE_ENABLE:
     case PARAM_OSC1_TRI_ENABLE:

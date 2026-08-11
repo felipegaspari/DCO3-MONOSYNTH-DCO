@@ -201,11 +201,16 @@ static constexpr uint8_t NOISE_PIO = 1;
 static constexpr uint8_t NOISE_SM = 1;
 
 #ifdef ENABLE_SUBOSC_ENGINE2
-// pio2 holds the whole sub engine: SM0..2 are the per-oscillator subs (SM index ==
-// oscillator index) and SM3 is reserved for the boolean logic combiner, which must be
-// loaded at instruction origin 0 because it dispatches through `out pc, 2`.
+// pio2 holds the whole sub engine: SM0/SM1 are the two subs (SM index == sub index) and SM3
+// is the boolean logic combiner, which must be loaded at instruction origin 0 because it
+// dispatches through `out pc, 2`. SM2 is left free.
 static constexpr uint8_t SUBOSC2_PIO = 2;
 static constexpr uint8_t SUBOSC2_LOGIC_SM = 3;
+
+// Two subs, not one per oscillator: the combined output is the interesting one, and either
+// sub can follow any oscillator's reset (subOscMaster[] below), so a third sub only bought a
+// third voice of the same timbre. Also the shape a one-sub-per-voice board wants.
+static constexpr uint8_t SUBOSC_COUNT = 2;
 #endif
 // Spare GP2: digital white bitstream when ENABLE_NOISE_OUT (see DCO.ino).
 static constexpr uint8_t NOISE_OUT_PIN = 2;
@@ -220,32 +225,24 @@ static constexpr uint8_t PW_PINS[NUM_OSCILLATORS] = { 3, PW_PIN_UNASSIGNED, PW_P
 static constexpr uint8_t SUBOSC_PIN = 8;
 
 #ifdef ENABLE_SUBOSC_ENGINE2
-// One sub output per oscillator, plus the boolean combiner's output. 0xFF = no pad on this
-// carrier yet, and the matching SM is simply never started (same idiom as PW_PINS[]).
+// One pad per sub, plus the boolean combiner's output. 0xFF = no pad on this carrier yet, and
+// the matching SM is simply never started (same idiom as PW_PINS[]).
 // Both combiner inputs have to be real pads even if only its output is mixed: PIO can read
-// a pin another SM drives, but it cannot see another SM's sideset state.
-// The combiner's `in pins, 2` reads two *consecutive* GPIOs, so whichever pair it listens
-// to must be adjacent.
-// All three subs sit on the consecutive chain GP8/GP9/GP10. GP8 is what the legacy sub has
-// always used; GP9 and GP10 are pads the CV map only *plans* to use - GP9 as Dist Drive (OSC3
-// level under ENABLE_VOICE_AUX), GP10 was cal sense before it moved to GP6 - and every one of
-// those definitions sits behind ENABLE_CV_OUTS / ENABLE_WAVE_MUX / ENABLE_VOICE_AUX, none of
-// which any current build defines, so nothing is driving them today. Turning those flags on
-// (or reviving cal sense on GP10) would double-book a pin and the map would need renegotiating.
-//
-// A chain of three pins only ever makes two of the three pairs adjacent, never all three -
-// three distinct pin numbers cannot be pairwise all one apart, that needs a "differs by 1"
-// triangle, and a triangle is impossible among distinct integers. GP8/GP9/GP10 gets subs 1+2
-// and subs 2+3 running; subs 1+3 (GP8/GP10, gap of 2) cannot, and never could with three pins
-// however assigned - subosc_logic_resolve() reports that pair honestly rather than silently
-// picking a wrong one.
+// a pin another SM drives, but it cannot see another SM's sideset state. Its `in pins, 2`
+// reads two *consecutive* GPIOs, which with two subs is satisfied once and for all by
+// GP8/GP9 - there is no pair to choose and nothing to report as unroutable.
+// GP8 is what the legacy sub has always used; GP9 and GP10 are pads the CV map only *plans*
+// to use - GP9 as Dist Drive (OSC3 level under ENABLE_VOICE_AUX), GP10 was cal sense before it
+// moved to GP6 - and every one of those definitions sits behind ENABLE_CV_OUTS /
+// ENABLE_WAVE_MUX / ENABLE_VOICE_AUX, none of which any current build defines, so nothing is
+// driving them today. Turning those flags on (or reviving cal sense on GP10) would double-book
+// a pin and the map would need renegotiating.
 static constexpr uint8_t SUBOSC_PIN_UNASSIGNED = 0xFF;
-static constexpr uint8_t SUBOSC_PINS[NUM_OSCILLATORS] = { SUBOSC_PIN, 9, 10 };
+static constexpr uint8_t SUBOSC_PINS[SUBOSC_COUNT] = { SUBOSC_PIN, 9 };
 
-// Combiner result. Moved here from GP10 so all three subs could chain onto 8/9/10; this pad
-// is one of the planned Dist Mix / Sub level CV pins, same "uncompiled today" reasoning as
-// the sub pads above.
-static constexpr uint8_t SUBOSC_LOGIC_PIN = 26;
+// Combiner result, and with the pass-through operators the only sub pad the carrier has to
+// mix: it can put out sub 1 or sub 2 on its own as well as any of the logic combinations.
+static constexpr uint8_t SUBOSC_LOGIC_PIN = 10;
 #endif
 
 // Temporary A/B: was 10. GP25 aborted (Pico LED / not on header). Header spare GP6.
@@ -380,13 +377,16 @@ static inline void note_retrig_set_mode(uint8_t m) {
 }
 
 // Sub-oscillator divide ratio: 0 = off, 2 = one octave down, 4 = two octaves.
-// With ENABLE_SUBOSC_ENGINE2 this stays the OSC1 value (what PARAM_SUBOSC_DIVIDE has always
-// meant) and mirrors subOscDivides[0].
+// With ENABLE_SUBOSC_ENGINE2 this mirrors subOscDivides[0], which is what PARAM_SUBOSC_DIVIDE
+// has always meant.
 uint8_t subOscDivide = 0;
 
 #ifdef ENABLE_SUBOSC_ENGINE2
-// Per-oscillator sub state. Each sub counts flybacks on its own RESET_PINS[osc], so index
-// here is the oscillator index, which is also its pio2 SM index.
+// Per-sub state, indexed by sub (0/1), which is also its pio2 SM index. Each sub counts
+// flybacks on the reset pin of the oscillator it follows.
+//   master 0..2 = which oscillator's RESET_PINS[] this sub locks to. Both subs on the same
+//            master gives harmonic pulse patterns; different masters gives ring-mod beating
+//            that tracks the detune between them.
 //   divide 0 = off; 1 = same rate as the master (phase/PWM only), 2, 4, 8 = octaves down.
 //   phase  = rising-edge delay after the master's reset, in degrees of the *master* period
 //            (0..359). Master-period rather than sub-period degrees because shifting the sub
@@ -394,41 +394,28 @@ uint8_t subOscDivide = 0;
 //   width  = duty as a fraction of the sub period in 1/256ths; 128 = the classic 50% square.
 static constexpr uint8_t SUBOSC_DIVIDE_MAX = 8;
 static constexpr uint8_t SUBOSC_WIDTH_DEFAULT = 128;
-// Divide is core-1 only (it moves state machines, so it arrives through the deferred PIO
-// queue). Phase and width are written straight from core 0 and read on core 1 next frame.
-uint8_t subOscDivides[NUM_OSCILLATORS] = { 0, 0, 0 };
-volatile uint16_t subOscPhaseDeg[NUM_OSCILLATORS] = { 0, 0, 0 };
-volatile uint8_t subOscWidth[NUM_OSCILLATORS] = {
-  SUBOSC_WIDTH_DEFAULT, SUBOSC_WIDTH_DEFAULT, SUBOSC_WIDTH_DEFAULT
-};
+// Divide and master are core-1 only (they move state machines, so they arrive through the
+// deferred PIO queue). Phase and width are written straight from core 0 and read on core 1
+// next frame. Default masters are OSC1 and OSC2, so the pair beats on their detune out of
+// the box rather than being two copies of the same thing.
+uint8_t subOscMaster[SUBOSC_COUNT] = { 0, 1 };
+uint8_t subOscDivides[SUBOSC_COUNT] = { 0, 0 };
+volatile uint16_t subOscPhaseDeg[SUBOSC_COUNT] = { 0, 0 };
+volatile uint8_t subOscWidth[SUBOSC_COUNT] = { SUBOSC_WIDTH_DEFAULT, SUBOSC_WIDTH_DEFAULT };
 uint32_t subosc_seg_offset = 0;
 
-// Boolean logic combiner on pio2 SM3. op: 0 = off, 1 = XOR, 2 = AND, 3 = OR, 4 = XNOR,
-// 5 = NAND, 6 = NOR. pair: 0 = subs 1+2, 1 = subs 1+3, 2 = subs 2+3.
-static constexpr uint8_t SUBOSC_LOGIC_OP_MAX = 6;
-static constexpr uint8_t SUBOSC_LOGIC_PAIR_MAX = 2;
-// Subs 1+2 (GP8/GP9): one of the two pairs the GP8/GP9/GP10 chain makes adjacent, and the
-// default because sub 1 is the one sub every build - even without ENABLE_SUBOSC_ENGINE2 - is
-// guaranteed to have wired. Subs 2+3 (GP9/GP10) also runs; subs 1+3 never can (see above). The
-// deferred request queue starts from the same constant, so core 0 setting only the operator
-// keeps the currently-applied pair.
-static constexpr uint8_t SUBOSC_LOGIC_PAIR_DEFAULT = 0;
+// Boolean logic combiner on pio2 SM3, always listening to GP8/GP9. op: 0 = off, 1 = XOR,
+// 2 = AND, 3 = OR, 4 = XNOR, 5 = NAND, 6 = NOR, 7 = sub 1 alone, 8 = sub 2 alone. The two
+// pass-throughs cost nothing - they are truth tables like the rest - and make the combiner pad
+// the single mixer feed for everything the engine can produce.
+static constexpr uint8_t SUBOSC_LOGIC_OP_MAX = 8;
 uint8_t subOscLogicOp = 0;
-uint8_t subOscLogicPair = SUBOSC_LOGIC_PAIR_DEFAULT;
-
-// Per-voice master combine: each sub's own pad carries `sub OP master`, master being that
-// oscillator's reset pulse, which its sub SM is already waiting on. Same operator numbering
-// as the combiner above except that 0 means the identity table - the plain sub square - since
-// there is no separate pad to fall silent. One shared program image on pio2, so the operator
-// is global across the three voices. Core-1 only: it rewrites instruction memory, so core 0
-// reaches it through the deferred PIO queue.
-static constexpr uint8_t SUBOSC_MASTER_OP_MAX = 6;
-uint8_t subOscMasterOp = 0;
 #endif
 
-// Mod-matrix offsets shared by all three subs, in matrix ±1023 units (see mod_matrix.h).
-// Written by mod_matrix_eval_subosc() and read by the sub engine, both on core 1, so no
-// mailbox ceremony. Defined even without the engine so the matrix code needs no flag.
+// Mod-matrix offsets, in matrix ±1023 units (see mod_matrix.h). Applied to sub 2 only, because
+// an equal offset on both subs cancels in the combiner. Written by mod_matrix_eval_subosc() and
+// read by the sub engine, both on core 1, so no mailbox ceremony. Defined even without the
+// engine so the matrix code needs no flag.
 int32_t subosc_mod_phase = 0;
 int32_t subosc_mod_pw = 0;
 

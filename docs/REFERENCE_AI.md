@@ -42,7 +42,7 @@ Related docs:
     - Clock and PIO timing constants (`sysClock_Hz` = Arduino `F_CPU` until boot, then `clock_get_hz(clk_sys)` via `sys_clock_hz_refresh()`; runtime `pioPulseLength` default 1600 / debug 160 ∈ [200, 50000], OSR chunk sizes, timing overheads).
     - **Period model** `period = Y + weight*clk_div + overhead`, with weights/overheads `{4,5,6,7}` / `{12,13,14,15}` indexed by `softSyncChunks` (`PIO_*_BY_CHUNKS[]`; N=1 aliases `PIO_RAMP_WEIGHT_SYNC` / `PIO_PERIOD_OVERHEAD_SYNC`). Each trailing polled chunk adds one weight and one overhead cycle.
     - Per-osc PIO state: `osc_uses_sync_program[]`, `osc_last_y[]`, `osc_last_clk_div[]`, `softSyncChunks`, `pio_loaded_sync_chunks`, `subOscDivide`.
-    - With `ENABLE_SUBOSC_ENGINE2` (RP2350 default): `subOscDivides[]` / `subOscPhaseDeg[]` / `subOscWidth[]`, logic op/pair, `subOscMasterOp` (per-voice master combine, global across voices), `subosc_mod_phase` / `subosc_mod_pw`; `SUBOSC_PINS = {8,9,10}`, `SUBOSC_LOGIC_PIN = 26`.
+    - With `ENABLE_SUBOSC_ENGINE2` (RP2350 default): `SUBOSC_COUNT = 2`, `subOscMaster[]` / `subOscDivides[]` / `subOscPhaseDeg[]` / `subOscWidth[]`, `subOscLogicOp` (0..8), `subosc_mod_phase` / `subosc_mod_pw` (sub 2 only); `SUBOSC_PINS = {8,9}`, `SUBOSC_LOGIC_PIN = 10`.
     - Fixed‑point pitch‑bend multipliers (`pitchBendMultiplier_q24`); LFO pitch mods live in `LFO.h` (`lfo1_pitch_mod_q24[]`, `lfo2_pitch_mod_q24[]`).
     - Global voice arrays (`VOICE_NOTES`, `VOICES`, `note_on_flag`, shared `PW[0]`, etc.).
     - Hardware pin mappings: `RESET_PINS = {19,18,15}`, `RANGE_PINS = {17,16,14}`, `PW_PINS[0] = 3`, classic `SUBOSC_PIN = 8`.
@@ -87,7 +87,7 @@ Related docs:
           - Corrected OSR clock dividers for OSC1–3 including OSC2 phase‑alignment; OSC3 free-running.
         - Performs **amplitude compensation** via `get_chan_level_lookup_fast()` (Q8 Hz domain) using precomputed quadratic windows (`amp_comp.h`) → **RANGE PWM** via `write_range_pwm()` (slice or PIO dither; not a PIO oscillator).
         - Writes new dividers into the three PIO SMs on pio0 and amp levels into RANGE channels.
-        - With `ENABLE_SUBOSC_ENGINE2`: `subosc2_update_periods()` recomputes each running sub's 3-word DMA group from that oscillator's period (`vt_subosc`).
+        - With `ENABLE_SUBOSC_ENGINE2`: `subosc2_update_periods()` recomputes each running sub's 3-word DMA group from the period of the oscillator that sub follows (`vt_subosc`).
         - At 99 µs intervals (`timer99microsFlag`), updates shared PW PWM, combining ADSR1 and LFO2 modulation in integer math and using `get_PW_level_interpolated()`.
 
     - **`voice_task_float()`** (float hot path, when `USE_FLOAT_VOICE_TASK` — **current default**):
@@ -129,8 +129,7 @@ Related docs:
   - `init_pio()` loads `frequency_sync_4_jumps` plus one soft-sync poll image into **pio0**, noise on pio1, then either classic `subosc_div2`/`div4` on pio1 **or** `subosc2_init()` on pio2 (`ENABLE_SUBOSC_ENGINE2`), then `assign_sm_mapping()` / `start_voice_sms()`.
 
 - **`subosc.h` / `subosc.ino`** (`ENABLE_SUBOSC_ENGINE2`)  
-  - Per-oscillator edge-locked subs on pio2 SM0..2 (`subosc_seg` @ offset 8, 22 instructions, 3-word DMA) + boolean logic combiner on SM3 (`subosc_logic` @ origin 0). ParamIds 90–100 and 102; mod dests 10/11; debug opcode 4. Pins GP8/9/10 + GP26. Detail: [`PIO_OSCILLATORS.md`](PIO_OSCILLATORS.md) §9, [`PINOUT.md`](PINOUT.md).
-  - Per-voice master combine (`PARAM_SUB_MASTER_OP`, 102 — 101 was taken): each sub pad carries `sub OP its own oscillator's reset pulse`, which its SM already waits on, so it costs no SM, DMA or pad. The operator is a four-entry truth table in six side-set words of `subosc_seg` (`SUBOSC_SEG_TABLE_SITES`), rewritten in place by `subosc2_set_master_op()`; one shared image means it is global across the three voices. Operator 0 is the identity table, i.e. the plain sub. §9.3.
+  - Two edge-locked subs on pio2 SM0/SM1 (`subosc_seg` @ offset 8, 3-word DMA), each following any oscillator's reset via `subOscMaster[]`, combined by the boolean logic combiner on SM3 (`subosc_logic` @ origin 0) whose output — including pass-throughs of either sub — is the pad that gets mixed. ParamIds 90–99; mod dests 10/11 (sub 2 only); debug opcode 4. Pins GP8/9, combiner out GP10. Detail: [`PIO_OSCILLATORS.md`](PIO_OSCILLATORS.md) §9, [`PINOUT.md`](PINOUT.md).
   - `start_voice_sms()`:
     - Calls `ensure_soft_sync_program()` so the resident poll image matches `softSyncChunks` when soft sync is on (swap via remove/add; hard sync leaves the current image unused).
     - Picks each oscillator's program: the slave runs the poll variant when `softSyncChunks > 0`, everything else runs `frequency_sync_4_jumps`.

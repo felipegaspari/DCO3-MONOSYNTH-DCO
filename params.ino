@@ -388,21 +388,18 @@ static void apply_param_subosc_divide(int16_t v) {
   pio_defer_request_subosc(divide);
 }
 
-// PARAM_SUB1..3_DIVIDE / _PHASE / _WIDTH: per-oscillator sub-oscillators. Ranges, clamping
-// and the core-0 handoff all live in subosc.h; without ENABLE_SUBOSC_ENGINE2 the divide on
-// oscillator 0 drives the single legacy sub and the rest are ignored.
+// PARAM_SUB1/2_DIVIDE / _MASTER / _PHASE / _WIDTH and the combiner operator. Ranges, clamping
+// and the core-0 handoff all live in subosc.h; without ENABLE_SUBOSC_ENGINE2 sub 1's divide
+// drives the single legacy sub and the rest are ignored.
 static void apply_param_sub1_divide(int16_t v) { subosc_param_divide(0, v); }
 static void apply_param_sub2_divide(int16_t v) { subosc_param_divide(1, v); }
-static void apply_param_sub3_divide(int16_t v) { subosc_param_divide(2, v); }
+static void apply_param_sub1_master(int16_t v) { subosc_param_master(0, v); }
+static void apply_param_sub2_master(int16_t v) { subosc_param_master(1, v); }
 static void apply_param_sub1_phase(int16_t v) { subosc_param_phase(0, v); }
 static void apply_param_sub2_phase(int16_t v) { subosc_param_phase(1, v); }
-static void apply_param_sub3_phase(int16_t v) { subosc_param_phase(2, v); }
 static void apply_param_sub1_width(int16_t v) { subosc_param_width(0, v); }
 static void apply_param_sub2_width(int16_t v) { subosc_param_width(1, v); }
-static void apply_param_sub3_width(int16_t v) { subosc_param_width(2, v); }
 static void apply_param_sub_logic_op(int16_t v) { subosc_param_logic_op(v); }
-static void apply_param_sub_logic_pair(int16_t v) { subosc_param_logic_pair(v); }
-static void apply_param_sub_master_op(int16_t v) { subosc_param_master_op(v); }
 
 // PARAM_LFO1_TO_DCO: LFO1 → DCO detune depth (full-scale Q24 for Q15 wave).
 static void apply_param_lfo1_to_dco(int16_t v) {
@@ -628,7 +625,7 @@ static void apply_param_manual_calibration_store(int16_t /*v*/) {
 // once both have answered, so this handler never blocks the audio core.
 // 13 dumps heap + per-core stack (mem_diag; needs ENABLE_MEM_DIAG; runtime polls on).
 // 14 / 15 disable / enable mem_diag loop polls (A/B vs profiler without rebuild).
-//  4 dumps the per-oscillator sub engine: segment words, DMA channels, FIFO level and why
+//  4 dumps the sub engine: each sub's master, segment words, DMA channels, FIFO level and why
 // the logic combiner is or is not running. Says so and stops without ENABLE_SUBOSC_ENGINE2.
 static void apply_param_debug_command(int16_t v) {
   // Wire may pack unsigned 16-bit (param16u); reinterpret before small-opcode switch.
@@ -859,16 +856,13 @@ static const ParamDescriptorT<int16_t> paramTable[] = {
   { PARAM_SUBOSC_DIVIDE,             apply_param_subosc_divide },
   { PARAM_SUB1_DIVIDE,               apply_param_sub1_divide },
   { PARAM_SUB2_DIVIDE,               apply_param_sub2_divide },
-  { PARAM_SUB3_DIVIDE,               apply_param_sub3_divide },
+  { PARAM_SUB1_MASTER,               apply_param_sub1_master },
+  { PARAM_SUB2_MASTER,               apply_param_sub2_master },
   { PARAM_SUB1_PHASE,                apply_param_sub1_phase },
   { PARAM_SUB2_PHASE,                apply_param_sub2_phase },
-  { PARAM_SUB3_PHASE,                apply_param_sub3_phase },
   { PARAM_SUB1_WIDTH,                apply_param_sub1_width },
   { PARAM_SUB2_WIDTH,                apply_param_sub2_width },
-  { PARAM_SUB3_WIDTH,                apply_param_sub3_width },
   { PARAM_SUB_LOGIC_OP,              apply_param_sub_logic_op },
-  { PARAM_SUB_LOGIC_PAIR,            apply_param_sub_logic_pair },
-  { PARAM_SUB_MASTER_OP,             apply_param_sub_master_op },
   { PARAM_LFO1_TO_DCO,               apply_param_lfo1_to_dco },
   { PARAM_LFO1_TO_OSC1,              apply_param_lfo1_to_osc1 },
   { PARAM_LFO1_TO_OSC2,              apply_param_lfo1_to_osc2 },

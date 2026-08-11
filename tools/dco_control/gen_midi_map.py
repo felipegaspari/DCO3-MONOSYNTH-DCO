@@ -343,9 +343,9 @@ def emit_chart(entries: list[Entry]) -> str:
         "## Deliberately not mapped",
         "",
         "Every non-reserved 7-bit controller is already assigned (0 free). Sub-oscillator "
-        "ParamIds 90–100 and LFO2→OSC3 coarse therefore stay panel/serial only; continuous "
+        "ParamIds 90–99 and LFO2→OSC3 coarse therefore stay panel/serial only; continuous "
         "sub shape still reaches the board through mod-matrix destinations 10/11 "
-        "(`MOD_DEST_SUB_PHASE` / `MOD_DEST_SUB_PW`).",
+        "(`MOD_DEST_SUB_PHASE` / `MOD_DEST_SUB_PW`, which land on sub 2).",
         "",
     ]
     for p in skipped:

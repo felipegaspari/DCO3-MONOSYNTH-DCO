@@ -200,10 +200,12 @@
 // working. Leave commented for active-high / direct FET discharge. See PIO_OSCILLATORS.md.
 #define ENABLE_PIO_RESET_INVERT
 
-// ENABLE_SUBOSC_ENGINE2 — one sub-oscillator per main oscillator on pio2: three SMs share
-// the subosc_seg program (edge-locked divide + programmable phase offset and pulse width,
-// three segment words streamed per period by DMA), plus pio2 SM3 for the boolean logic
-// combiner. Off = the classic pio1 subosc_div2 / subosc_div4 fixed 50% sub on OSC1 only.
+// ENABLE_SUBOSC_ENGINE2 — two sub-oscillators on pio2, each following whichever main
+// oscillator it is pointed at: two SMs share the subosc_seg program (edge-locked divide plus
+// programmable phase offset and pulse width, three segment words streamed per period by DMA),
+// and pio2 SM3 combines them with a boolean operator - the combined square, or either sub
+// passed through, is what the carrier mixes. Off = the classic pio1 subosc_div2 / subosc_div4
+// fixed 50% sub on OSC1 only.
 //
 // Needs a third PIO block, so it is a board default like the engine flags above: on for
 // RP2350, unavailable on RP2040 (RP2040 keeps the old sub with no source edits). Uncomment

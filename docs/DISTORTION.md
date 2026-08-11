@@ -201,7 +201,7 @@ Prototype CV outs (PWM + RC, same domain as cutoff/VCA):
 | CV | Provisional GPIO | PWM notes |
 |----|------------------|-----------|
 | Drive | **GP9** | Slice 4 B, wrap `DIV_COUNTER_CV` (4095). **Conflicts with Sub 2** when `ENABLE_SUBOSC_ENGINE2` is on — see [`PINOUT.md`](PINOUT.md) |
-| Mix | **GP26** | Slice 5 A — shares slice with main VCA (GP11 B); both CV, wrap OK. **Conflicts with logic combiner** when `ENABLE_SUBOSC_ENGINE2` is on — see [`PINOUT.md`](PINOUT.md) |
+| Mix | **GP26** | Slice 5 A — shares slice with main VCA (GP11 B); both CV, wrap OK |
 
 Pins are provisional pending the final RP2350B map. Do not place these on a slice that must keep `DIV_COUNTER` / `DIV_COUNTER_PW` wraps (RANGE / PW).
 

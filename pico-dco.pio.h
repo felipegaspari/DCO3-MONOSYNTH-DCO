@@ -509,9 +509,10 @@ void subosc_init(PIO pio, uint sm, uint offset, uint masterPin, uint outPin, boo
 // The two sub pins are read as a 2-bit number and used as an index straight into a four-entry
 // jump table, one entry per input combination, each side-setting the output to that
 // combination's result. The operator lives entirely in the table, so switching between
-// XOR / AND / OR / XNOR / NAND / NOR is four instruction-memory writes and no reconfiguration
-// (see subosc_logic_entry_instr / subosc.ino). All six are symmetric, so which sub sits on
-// which pin does not matter.
+// XOR / AND / OR / XNOR / NAND / NOR - or a pass-through of either input on its own - is four
+// instruction-memory writes and no reconfiguration (see subosc_logic_entry_instr / subosc.ino).
+// The logic operators are all symmetric; the pass-throughs are not, so which sub sits on the
+// IN base does matter.
 //
 // `out pc, 2` is an absolute jump, so origin is 0 and subosc_seg is parked above this.
 //
@@ -532,10 +533,10 @@ static inline uint16_t subosc_logic_entry_instr(bool high) {
 }
 
 static const uint16_t subosc_logic_program_instructions[] = {
-    0x1004, //  0: jmp    entry           side 0     ; A=0 B=0
-    0x1804, //  1: jmp    entry           side 1     ; A=1 B=0  (default table is XOR)
-    0x1804, //  2: jmp    entry           side 1     ; A=0 B=1
-    0x1004, //  3: jmp    entry           side 0     ; A=1 B=1
+    0x1004, //  0: jmp    entry           side 0     ; sub1=0 sub2=0
+    0x1804, //  1: jmp    entry           side 1     ; sub1=1 sub2=0  (default table is XOR)
+    0x1804, //  2: jmp    entry           side 1     ; sub1=0 sub2=1
+    0x1004, //  3: jmp    entry           side 0     ; sub1=1 sub2=1
     0xa0c3, //  4: mov    isr, null
     0x4002, //  5: in     pins, 2
     0xa0e6, //  6: mov    osr, isr
@@ -582,7 +583,8 @@ void subosc_logic_init(PIO pio, uint sm, uint inBase, uint outPin) {
 // ----------- //
 
 // Sub-oscillator with programmable phase offset and pulse width (ENABLE_SUBOSC_ENGINE2).
-// One resident copy on pio2 serves all three oscillators, SM index == oscillator index.
+// One resident copy on pio2 serves both subs, SM index == sub index, each following whichever
+// oscillator's RESET pad it was given as its IN pin.
 //
 // A sub period is two segments, low then high, each "Cn whole master flybacks then Fn fine
 // system-clock cycles", pulled as three words per period: Cl | Ch<<16, Fl, Fh. Counting
@@ -591,85 +593,44 @@ void subosc_logic_init(PIO pio, uint sm, uint inBase, uint outPin) {
 // CPU rewrite racing the DMA cannot pair an old Cl with a new Ch, which would cost or add a
 // master period. See docs/PIO_OSCILLATORS.md section 9.
 //
-// The output is `sub OP master`, master being that oscillator's reset pulse and OP a
-// four-entry truth table indexed by (sub << 1) | pulse. Cl + Ch equals the divide ratio, so
-// every master period is consumed by exactly one wait pair in here: this SM is already
-// standing on both edges of every reset pulse and can flip its own output there, costing no
-// second state machine, no pin sampling and no extra pad. The flip has to be the instruction
-// *after* the wait - a side-set on the wait itself applies when the wait issues, which can be
-// a whole master period early. subosc2_set_master_op() rewrites the six side-set words listed
-// in SUBOSC_SEG_TABLE_SITES; the defaults below are the identity table (output = sub), which
-// is bit-for-bit the plain sub this grew out of.
-//
 // PULL is opcode 100 with [7] = pull, [6] = ifempty, [5] = block: pull block = 0x80a0.
 // OUT is 011 with [7:5] dest and [4:0] count, so out y, 16 = 0x6050 and out x, 16 = 0x6030.
-// MOV operand is [7:5] dest, [4:3] op, [2:0] source: mov y, osr = 0xa047, mov y, x = 0xa041,
-// nop = mov y, y = 0xa042 (+0x1000 for side 0, +0x1800 for side 1). JMP conditions live in
-// operand [7:5]: 011 = !y, 100 = y--. pio_add_program relocates JMP targets, so addresses
-// here are program-relative.
+// MOV operand is [7:5] dest, [4:3] op, [2:0] source: mov y, osr = 0xa047, mov y, x = 0xa041
+// (+0x1000 for side 0, +0x1800 for side 1). JMP conditions live in operand [7:5]: 011 = !y,
+// 100 = y--. pio_add_program relocates JMP targets, so addresses here are program-relative.
 //
 // OSR shift direction stays at the default right, so out y, 16 takes Cl from the low half.
 
 #define subosc_seg_wrap_target 0
-#define subosc_seg_wrap 21
+#define subosc_seg_wrap 17
 
 static const uint16_t subosc_seg_program_instructions[] = {
             //     .wrap_target
     0x80a0, //  0: pull   block                      ; Cl | Ch<<16
-    0x7050, //  1: out    y, 16           side 0     ; Y = Cl, sub low.  T00
+    0x7050, //  1: out    y, 16           side 0     ; Y = Cl, sub low
     0x6030, //  2: out    x, 16                      ; X = Ch, parked
-    0x0069, //  3: jmp    !y, 9
+    0x0067, //  3: jmp    !y, 7
     0x20a0, //  4: wait   1 pin, 0
-    0xb042, //  5: nop                    side 0     ; T01
-    0x2020, //  6: wait   0 pin, 0
-    0xb042, //  7: nop                    side 0     ; T00
-    0x0083, //  8: jmp    y--, 3
-    0x80a0, //  9: pull   block                      ; Fl
-    0xa047, // 10: mov    y, osr
-    0x008b, // 11: jmp    y--, 11
-    0xb841, // 12: mov    y, x            side 1     ; Y = Ch, sub high. T10
-    0x0073, // 13: jmp    !y, 19
-    0x20a0, // 14: wait   1 pin, 0
-    0xb842, // 15: nop                    side 1     ; T11
-    0x2020, // 16: wait   0 pin, 0
-    0xb842, // 17: nop                    side 1     ; T10
-    0x008d, // 18: jmp    y--, 13
-    0x80a0, // 19: pull   block                      ; Fh
-    0xa047, // 20: mov    y, osr
-    0x0095, // 21: jmp    y--, 21
+    0x2020, //  5: wait   0 pin, 0
+    0x0083, //  6: jmp    y--, 3
+    0x80a0, //  7: pull   block                      ; Fl
+    0xa047, //  8: mov    y, osr
+    0x0089, //  9: jmp    y--, 9
+    0xb841, // 10: mov    y, x            side 1     ; Y = Ch, sub high
+    0x006f, // 11: jmp    !y, 15
+    0x20a0, // 12: wait   1 pin, 0
+    0x2020, // 13: wait   0 pin, 0
+    0x008b, // 14: jmp    y--, 11
+    0x80a0, // 15: pull   block                      ; Fh
+    0xa047, // 16: mov    y, osr
+    0x0091, // 17: jmp    y--, 17
             //     .wrap
 };
-
-// Where the truth table lives inside the image. T00 and T10 appear twice: once inside their
-// loop, once on the segment's own edge instruction, because the pin has to hold the released
-// level through the fine delay as well. `instr` is the word with the side-set value bit
-// cleared, so a rewrite is one OR - see subosc_seg_table_instr().
-#define SUBOSC_SEG_TABLE_LEN 4
-#define SUBOSC_SEG_TABLE_SITE_COUNT 6
-
-typedef struct {
-    uint8_t addr;    // program-relative
-    uint8_t entry;   // (sub << 1) | pulse
-    uint16_t instr;  // side-set value bit already cleared
-} subosc_seg_table_site_t;
-
-static const subosc_seg_table_site_t SUBOSC_SEG_TABLE_SITES[SUBOSC_SEG_TABLE_SITE_COUNT] = {
-    {  1, 0, 0x7050 },  // out y, 16   sub low,  master released
-    {  7, 0, 0xb042 },  // nop         sub low,  master released
-    {  5, 1, 0xb042 },  // nop         sub low,  master asserted
-    { 12, 2, 0xb041 },  // mov y, x    sub high, master released
-    { 17, 2, 0xb042 },  // nop         sub high, master released
-    { 15, 3, 0xb042 },  // nop         sub high, master asserted
-};
-
-static inline uint16_t subosc_seg_table_instr(const subosc_seg_table_site_t* site, bool high) {
-    return (uint16_t)(site->instr | (high ? 0x0800u : 0x0000u));
-}
 
 #if !PICO_NO_HARDWARE
 static const struct pio_program subosc_seg_program = {
     .instructions = subosc_seg_program_instructions,
-    .length = 22,
+    .length = 18,
     .origin = -1,
 };
 
@@ -680,7 +641,7 @@ static inline pio_sm_config subosc_seg_program_get_default_config(uint offset) {
     return c;
 }
 
-// Per-oscillator sub. masterPin is that oscillator's RESET pad and is an input only - do
+// One sub. masterPin is its master oscillator's RESET pad and is an input only - do
 // NOT pio_gpio_init it, that would move its function select to pio2 and steal the reset
 // output away from pio0. Autopull stays off: the program pulls explicitly, and `mov y, osr`
 // never shifts, so shift direction and threshold do not matter here.

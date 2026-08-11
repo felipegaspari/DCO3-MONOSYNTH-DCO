@@ -42,9 +42,10 @@ enum ModDest : uint8_t {
   MOD_DEST_VCF_CUTOFF = 7,
   MOD_DEST_DIST_MIX = 8,
   MOD_DEST_PITCH = 9,
-  // Sub-oscillator shape, applied to all three subs at once (ENABLE_SUBOSC_ENGINE2). Full
-  // depth sweeps one whole master period of phase / the whole duty range. Inert on builds
-  // without the engine; the IDs are kept stable for the panel either way.
+  // Sub-oscillator shape, applied to sub 2 only (ENABLE_SUBOSC_ENGINE2) - an equal offset on
+  // both subs cancels in the combiner, which is the output that gets mixed. Full depth sweeps
+  // one whole master period of phase / the whole duty range. Inert on builds without the
+  // engine; the IDs are kept stable for the panel either way.
   MOD_DEST_SUB_PHASE = 10,
   MOD_DEST_SUB_PW = 11,
   MOD_DEST_COUNT = 12
