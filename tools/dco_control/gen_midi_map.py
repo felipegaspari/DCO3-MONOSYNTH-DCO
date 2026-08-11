@@ -331,12 +331,23 @@ def emit_chart(entries: list[Entry]) -> str:
         for e in menus:
             values = ", ".join(f"{label} = {value}" for label, value in e.choices)
             out.append(f"- **CC {e.cc}, {e.label}**: {values}")
+            if e.note:
+                out.append(f"  - {e.note}")
             if e.unreachable:
                 missing = ", ".join(f"{label} ({value})" for label, value in e.unreachable)
                 out.append(f"  - out of 7-bit reach, use the serial bench app instead: {missing}")
 
     skipped = [p for p in params.PARAMS if p.cc is None]
-    out += ["", "## Deliberately not mapped", ""]
+    out += [
+        "",
+        "## Deliberately not mapped",
+        "",
+        "Every non-reserved 7-bit controller is already assigned (0 free). Sub-oscillator "
+        "ParamIds 90–100 and LFO2→OSC3 coarse therefore stay panel/serial only; continuous "
+        "sub shape still reaches the board through mod-matrix destinations 10/11 "
+        "(`MOD_DEST_SUB_PHASE` / `MOD_DEST_SUB_PW`).",
+        "",
+    ]
     for p in skipped:
         out.append(f"- **{p.label}** (parameter {p.pid})")
     out += [
@@ -348,7 +359,8 @@ def emit_chart(entries: list[Entry]) -> str:
         "Reserved controllers left untouched: "
         + ", ".join(str(c) for c in sorted(RESERVED_CC))
         + ". CC 42 keeps its historical meaning here, pitch-bend range in semitones. "
-        "98-101 stay free so a later NRPN upgrade needs no reshuffling.",
+        "98-101 stay free so a later NRPN upgrade needs no reshuffling. CC 120 (All Sound "
+        "Off) is reserved and is why LFO2→OSC3 coarse has no assignment.",
         "",
     ]
     return "\n".join(out)

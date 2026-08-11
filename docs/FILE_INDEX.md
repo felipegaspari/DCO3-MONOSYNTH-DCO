@@ -280,7 +280,7 @@ PIO load, SM setup, sync topology and diagnostics. **All three oscillators live 
 - `assign_sm_mapping()` — Rewrite `VOICE_TO_SM` so the slave outranks-below its master.
   - **Called from:** `init_pio()`, `setSyncMode()`.
   - **When:** Boot; sync topology change.
-- `init_pio()` — `pio_sm_claim` pio0 SM0–2 + pio1 subosc/noise SMs; load free + one soft-sync poll image into pio0 and the sub-osc programs into pio1.
+- `init_pio()` — `pio_sm_claim` pio0 SM0–2 + pio1 noise (and classic sub SM if no engine2); load free + one soft-sync poll image into pio0; classic sub programs into pio1 **or** `subosc2_init()` on pio2.
   - **Called from:** `setup1()`.
   - **When:** Boot Core1.
 - `ensure_soft_sync_program()` — Swap resident poll image (N=1/2/3) via remove/add.
@@ -306,18 +306,44 @@ PIO load, SM setup, sync topology and diagnostics. **All three oscillators live 
   - **Called from:** Bench/diagnostic use.
 - `pio_period_probe()` / `pio_solve_period_model()` — Bench helpers for confirming the
   period weight and overhead against a frequency counter.
-- `set_subosc_divide()` — (Re)configure the sub-oscillator on pio1 SM0.
-  - **Called from:** `init_pio()`, `apply_param_subosc_divide()`.
-- `init_pio()` also loads `noise_lfsr` at PIO1 origin 0 (SM1) before the sub-osc programs
+- `set_subosc_divide()` — Classic: (re)configure pio1 SM0. Engine2: same divide on all three via `subosc2_set_divide()`.
+  - **Called from:** `init_pio()`, deferred `PARAM_SUBOSC_DIVIDE`.
+- `pio_defer_request_subosc_divide()` / `_logic_op` / `_logic_pair` / `_master_op` — Core-0 → core-1 queue (`ENABLE_SUBOSC_ENGINE2`).
+  - **Called from:** `subosc_param_*()`.
+  - **When:** Serviced in `pio_defer_service()` before `voice_task`.
+- `init_pio()` also loads `noise_lfsr` at PIO1 origin 0 (SM1) before any other PIO1 programs
   and starts it via `noise_lfsr_init()` — white words for `noise.h`.
+
+### `subosc.h` / `subosc.ino`
+
+Per-oscillator sub engine on pio2 when `ENABLE_SUBOSC_ENGINE2` ([`PIO_OSCILLATORS.md`](PIO_OSCILLATORS.md) §9).
+RP2040 builds keep stub `subosc_param_*` so `params.ino` needs no flags.
+
+**Functions**
+- `subosc2_init()` — Claim pio2 SM0–3; load `subosc_seg` @ 8 + `subosc_logic` @ 0; claim DMA pairs.
+  - **Called from:** `init_pio()`.
+- `subosc2_set_divide()` / `subosc2_set_phase_deg()` / `subosc2_set_width()` — Per-osc shape.
+  - **Called from:** deferred divide; param phase/width mailboxes.
+- `subosc2_set_logic()` — Combiner table rewrite or IN-base reconfigure.
+  - **Called from:** `pio_defer_service()`, `subosc2_init()`.
+- `subosc2_set_master_op()` — Per-voice master combine: rewrites the six truth-table side-set words of `subosc_seg` in place (global across the three voices, one shared image). Operator 0 = plain sub.
+  - **Called from:** `pio_defer_service()`, `subosc2_init()`.
+- `subosc2_update_periods()` — Recompute 3-word segment groups; calls `mod_matrix_eval_subosc()`.
+  - **Called from:** both voice engines each control frame (`vt_subosc`).
+- `subosc2_report()` — Paced bench dump (opcode 4).
+  - **Called from:** `apply_param_debug_command()` case 4.
+- `subosc_param_divide/phase/width/logic_op/logic_pair/master_op()` — Core-0 ParamId entry points.
+  - **Called from:** `params.ino` apply handlers.
 
 ### `pico-dco.pio`
 
 PIO assembly source. **Not C functions.** Programs in use: `frequency_sync_4_jumps`
 (free-running, weight 4), `frequency_sync_poll` / `_2` / `_3` (soft-sync slave, N=1/2/3
 trailing `jmp pin` chunks, weights 5/6/7; one resident at a time), `noise_lfsr` (PIO1
-origin 0), `subosc_div2` / `subosc_div4`. Comment-only listing for RANGE dither
-(`range_pwm_dither`; real encoding in `range_pwm_dither.pio.h`).
+origin 0), `subosc_logic` + `subosc_seg` (PIO2 when engine2; `subosc_seg` carries the
+per-voice master-combine truth table in six of its side-set words), else `subosc_div2` /
+`subosc_div4` (PIO1). Comment-only listing for RANGE dither (`range_pwm_dither`; real
+encoding in `range_pwm_dither.pio.h`).
 
 Annotated listings and the period model for each program: [`PIO_OSCILLATORS.md`](PIO_OSCILLATORS.md).
 
@@ -411,6 +437,10 @@ Sparse mod matrix (8 slots). Docs: [`MOD_MATRIX.md`](MOD_MATRIX.md).
   - **Called from:** `note_on()` / MIDI AT callback.
 - `mod_matrix_accumulate()` / `mod_matrix_apply_cv()` — Sum → level PWM + `RESONANCE_PWM[]` + Dist Drive / Dist Mix; cutoff sum in `update_CV_outs()`.
   - **Called from:** `update_CV_outs()`.
+- `mod_matrix_eval_pitch_q24()` — Pitch dest only → Q24.
+  - **Called from:** voice engines.
+- `mod_matrix_eval_subosc()` — Sub phase / PW dests → `subosc_mod_phase` / `subosc_mod_pw`.
+  - **Called from:** `subosc2_update_periods()` (not via `update_CV_outs`, so works without `ENABLE_CV_OUTS`).
 
 ### `cv_out.h` / `cv_out.ino` / `cv_state.h`
 
@@ -915,7 +945,10 @@ Non-blocking inner-frame parser. RAW: cmd LUT + fixed payload. COBS (`SERIAL_FRA
 - `apply_param_analog_drift_spread()` — Drift spread (recomputes speeds).
 - `apply_param_sync_mode()` — → `setSyncMode()`.
 - `apply_param_soft_sync()` — Soft sync threshold 0..3 (hard / poll N=1/2/3) → `setSyncMode()`.
-- `apply_param_subosc_divide()` — Sub-osc off / ÷2 / ÷4 → `set_subosc_divide()`.
+- `apply_param_subosc_divide()` — Legacy id 37 → deferred `set_subosc_divide()` (engine2: all three).
+- `apply_param_sub1/2/3_divide/phase/width()` — ParamIds 90–98 → `subosc_param_*()`.
+- `apply_param_sub_logic_op/pair()` — ParamIds 99–100 → `subosc_param_logic_*()`.
+- `apply_param_sub_master_op()` — ParamId 102 → `subosc_param_master_op()` (per-voice master combine; 101 was taken).
 - `apply_param_lfo1_to_dco()` — LFO1→DCO depth (`expConverterFloat`).
 - `apply_param_lfo1_to_osc1/2/3()` — additive LFO1 pitch depth per osc (stacks on global FIFO bus).
 - `apply_param_lfo1_speed()` — LFO1 rate.
@@ -936,7 +969,7 @@ Non-blocking inner-frame parser. RAW: cmd LUT + fixed payload. COBS (`SERIAL_FRA
 - `apply_param_manual_calibration_offset()` — Per-osc manual offset.
 - `apply_param_manual_calibration_store()` — → `update_FS_ManualCalibrationOffset`.
 - `apply_param_character()` — `PARAM_CHARACTER` (221): master 0..128 → `character_recompute_scales()`. See [`CHARACTER.md`](CHARACTER.md).
-- `apply_param_debug_command()` — Bench diagnostics (id 160): 1 → `pio_topology_report()`, 2/3 → `pio_period_probe()` at a low/high divider, 10/11/12 → profiler dump / reset / periodic toggle (`RUNNING_AVERAGE`), **13 → `mem_diag_request()`** (heap/stack; `ENABLE_MEM_DIAG` + runtime polls on; [`MEMORY.md`](MEMORY.md)), **14/15 → mem_diag polls off/on** (ack `mem_diag polls=…`; `compiled out` if flag off), 20–22 → amp-comp method (FLOAT_QUAD / LUT / FIXED), 24/25 → amp-comp speed/accuracy (`AMP_COMP_BENCHMARK` + `RUNNING_AVERAGE`), 28/29 → pitch-interp speed/accuracy (`RUNNING_AVERAGE`), 30 → force-seed fake calibration tables, **32/33 → clkdiv all six vs GOLD_REF** (both voice engines; `RUNNING_AVERAGE`), **200–50000** (uint16) → set `pioPulseLength` and reload running SMs via `pio_defer_request_reset_pulse_all()`, **0xC8xx / 0xCAxx / 0xCBxx** → Character-tab axis jitters (amp / pitch / PW) then recompute scales. Period probes only hold with no note playing.
+- `apply_param_debug_command()` — Bench diagnostics (id 160): 1 → `pio_topology_report()`, 2/3 → `pio_period_probe()` at a low/high divider, **4 → `subosc2_report()`**, 10/11/12 → profiler dump / reset / periodic toggle (`RUNNING_AVERAGE`), **13 → `mem_diag_request()`** (heap/stack; `ENABLE_MEM_DIAG` + runtime polls on; [`MEMORY.md`](MEMORY.md)), **14/15 → mem_diag polls off/on** (ack `mem_diag polls=…`; `compiled out` if flag off), 20–22 → amp-comp method (FLOAT_QUAD / LUT / FIXED), 24/25 → amp-comp speed/accuracy (`AMP_COMP_BENCHMARK` + `RUNNING_AVERAGE`), 28/29 → pitch-interp speed/accuracy (`RUNNING_AVERAGE`), 30 → force-seed fake calibration tables, **32/33 → clkdiv all six vs GOLD_REF** (both voice engines; `RUNNING_AVERAGE`), **200–50000** (uint16) → set `pioPulseLength` and reload running SMs via `pio_defer_request_reset_pulse_all()`, **0xC8xx / 0xCAxx / 0xCBxx** → Character-tab axis jitters (amp / pitch / PW) then recompute scales. Period probes only hold with no note playing.
 
 ---
 
@@ -1022,6 +1055,10 @@ All detailed docs live under `docs/` (this file included). Root `README.md` is t
 | `docs/DUAL_MCU.md` | RP2350A + RP2040 ownership; Input TX fanout; `ENABLE_VOICE_AUX`; ParamId table. |
 | `../VOICE-AUX/` | RP2040 voice-aux sketch (Dist 52/53, mode 54); see `VOICE-AUX/docs/README.md`. |
 | `docs/ENGINE_OPTIONS.md` | Float/fixed engine flags. |
+| `docs/BUILD_FLAGS.md` | Complete compile-time flag catalog (incl. `ENABLE_SUBOSC_ENGINE2`). |
+| `docs/PIO_OSCILLATORS.md` | PIO programs, period model, sync, phase align, sub-osc §9. |
+| `docs/PINOUT.md` | Provisional pin map (subs GP8/9/10, logic GP26, CV conflicts). |
+| `docs/MOD_MATRIX.md` | Sparse mod matrix (incl. sub phase / PW dests 10/11). |
 | `docs/BENCHMARKING.md` | Hot-path profiler: probes, reading the budget, adding a probe. |
 | `docs/MEMORY.md` | SRAM / heap / stack: `__not_in_flash_func`, dump cmd 13, pin policy. |
 | `docs/DISTORTION.md` | Post-LP Drive/Mix distortion hardware idea and CV prototype. |
@@ -1085,3 +1122,5 @@ All detailed docs live under `docs/` (this file included). Root `README.md` is t
 | Measure where the time goes | `RUNNING_AVERAGE` in `DCO.ino` → probe table in `bench.h` → debug command 10 |
 | Measure SRAM / heap / stack | dump cmd **13** → [`MEMORY.md`](MEMORY.md) / `mem_diag.ino`; `ENABLE_MEM_DIAG` + runtime 14/15; pin policy there |
 | RANGE carrier / slice vs PIO dither | `RANGE0_PIO_DITHER_TEST` in `DCO.ino` → `PWM.h` / `PWM.ino` / [`PIO_OSCILLATORS.md`](PIO_OSCILLATORS.md) §4.4 |
+| Per-osc sub / logic combiner | `ENABLE_SUBOSC_ENGINE2` → `subosc.ino` / [`PIO_OSCILLATORS.md`](PIO_OSCILLATORS.md) §9; ParamIds 90–100; debug opcode 4 |
+| Sub combined with its own osc | `PARAM_SUB_MASTER_OP` (102) → `subosc2_set_master_op()` / [`PIO_OSCILLATORS.md`](PIO_OSCILLATORS.md) §9.3 |

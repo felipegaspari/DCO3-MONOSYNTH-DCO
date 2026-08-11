@@ -6,7 +6,7 @@
 // Re-run that script after changing params.py; see docs/MIDI_CC_MAP.md for the chart.
 //
 // cc, target, lo, hi, curve. CC 0 lands on lo and CC 127 on hi; targets at or above
-// CC_LOCAL_FIRST are ADSR/filter block values that midi_cc_apply() writes directly.
+// CC_LOCAL_FIRST are block values that midi_cc_apply() writes directly.
 
 #include <stddef.h>
 #include "params_def.h"
@@ -46,13 +46,14 @@ static const MidiCcEntry midiCcMap[] = {
   { 116, PARAM_OSC3_PULSE_ENABLE,             0,     1, MIDI_CC_LINEAR },
   { 117, PARAM_OSC3_TRI_ENABLE,               0,     1, MIDI_CC_LINEAR },
   // --- Envelopes ---
+  {  48, PARAM_ADSR1_TO_VCA,                  0,   512, MIDI_CC_LINEAR },
   {  24, PARAM_ADSR3_ENABLED,                 0,     1, MIDI_CC_LINEAR },
   {  25, PARAM_ADSR3_TO_OSC_SELECT,           0,   127, MIDI_CC_LINEAR },
   {  26, PARAM_ADSR3_TO_DETUNE1,           -511,   511, MIDI_CC_LINEAR },
-  {  27, PARAM_ADSR1_ATTACK_CURVE,            0,     7, MIDI_CC_LINEAR },
-  {  28, PARAM_ADSR1_DECAY_CURVE,             0,     7, MIDI_CC_LINEAR },
-  {  29, PARAM_ADSR2_ATTACK_CURVE,            0,     7, MIDI_CC_LINEAR },
-  {  30, PARAM_ADSR2_DECAY_CURVE,             0,     7, MIDI_CC_LINEAR },
+  {  27, PARAM_ADSR1_ATTACK_CURVE,            0,   127, MIDI_CC_LINEAR },
+  {  28, PARAM_ADSR1_DECAY_CURVE,             0,   127, MIDI_CC_LINEAR },
+  {  29, PARAM_ADSR2_ATTACK_CURVE,            0,   127, MIDI_CC_LINEAR },
+  {  30, PARAM_ADSR2_DECAY_CURVE,             0,   127, MIDI_CC_LINEAR },
   {  31, PARAM_VCA_ADSR_RESTART,              0,     1, MIDI_CC_LINEAR },
   {  33, PARAM_VCF_ADSR_RESTART,              0,     1, MIDI_CC_LINEAR },
   {  34, CC_LOCAL_ADSR_VCA_ATTACK,            0,  4095, MIDI_CC_EXP_TIME },
@@ -67,7 +68,6 @@ static const MidiCcEntry midiCcMap[] = {
   {  45, CC_LOCAL_ADSR_DCO_DECAY,             0,  4095, MIDI_CC_EXP_TIME },
   {  46, CC_LOCAL_ADSR_DCO_SUSTAIN,           0,  4095, MIDI_CC_LINEAR },
   {  47, CC_LOCAL_ADSR_DCO_RELEASE,           0,  4095, MIDI_CC_EXP_TIME },
-  {  48, PARAM_ADSR1_TO_VCA,                  0,   512, MIDI_CC_LINEAR },
   // --- Filter ---
   {  49, PARAM_VCF_KEYTRACK,               -256,   255, MIDI_CC_LINEAR },
   {  50, PARAM_VELOCITY_TO_VCF,               0,    20, MIDI_CC_LINEAR },
@@ -80,10 +80,10 @@ static const MidiCcEntry midiCcMap[] = {
   {  54, CC_LOCAL_FILTER_ADSR2_TO_VCF,        0,   512, MIDI_CC_LINEAR },
   {  55, CC_LOCAL_FILTER_LFO2_TO_VCF,         0,   512, MIDI_CC_LINEAR },
   // --- PWM ---
+  {  59, PARAM_PW_VALUE,                      0,  4095, MIDI_CC_LINEAR },
   {  56, PARAM_LFO2_TO_PW,                    0,   511, MIDI_CC_LINEAR },
   {  57, PARAM_ADSR3_TO_PWM,                  0,  1023, MIDI_CC_LINEAR },
   {  58, PARAM_PWM_POTS_CONTROL_MANUAL,       0,     1, MIDI_CC_LINEAR },
-  {  59, PARAM_PW_VALUE,                      0,  4095, MIDI_CC_LINEAR },
   // --- LFOs ---
   {  60, PARAM_LFO1_WAVEFORM,                 0,   127, MIDI_CC_LINEAR },
   {  61, PARAM_LFO2_WAVEFORM,                 0,   127, MIDI_CC_LINEAR },
@@ -97,7 +97,6 @@ static const MidiCcEntry midiCcMap[] = {
   {  67, PARAM_LFO2_TO_OSC2,                  0,   255, MIDI_CC_LINEAR },
   {  68, PARAM_LFO2_TO_OSC3,                  0,   255, MIDI_CC_LINEAR },
   { 119, PARAM_LFO2_TO_OSC2_COARSE,           0,   511, MIDI_CC_LINEAR },
-  { 120, PARAM_LFO2_TO_OSC3_COARSE,           0,   511, MIDI_CC_LINEAR },
   // --- Mod matrix ---
   {  84, PARAM_MOD_SLOT0_SOURCE,              0,   127, MIDI_CC_LINEAR },
   {  85, PARAM_MOD_SLOT0_DEST,                0,   127, MIDI_CC_LINEAR },

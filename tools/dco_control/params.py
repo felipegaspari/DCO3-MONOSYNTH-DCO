@@ -16,6 +16,7 @@ import protocol
 
 # Tab names, in display order.
 GROUP_OSC = "Oscillators"
+GROUP_SUB = "Sub-osc"
 GROUP_ENV = "Envelopes"
 GROUP_FILTER = "Filter"
 GROUP_PWM = "PWM"
@@ -28,6 +29,7 @@ GROUP_DIAG = "Diagnostics"
 
 GROUP_ORDER = [
     GROUP_OSC,
+    GROUP_SUB,
     GROUP_ENV,
     GROUP_FILTER,
     GROUP_PWM,
@@ -69,6 +71,52 @@ _MOD_DESTS = (
     ("7 VCF cutoff", 7),
     ("8 Dist Mix", 8),
     ("9 Pitch (±1 oct @ ±1023)", 9),
+    ("10 Sub phase (all subs)", 10),
+    ("11 Sub pulse width (all subs)", 11),
+)
+
+# --- Sub-oscillators (ENABLE_SUBOSC_ENGINE2, RP2350 only) -------------------
+# One sub per oscillator on pio2, each optionally combined with its own oscillator's reset
+# pulse, plus a cross-voice boolean combiner on SM3. None of these get a MIDI CC: every
+# non-reserved controller is already taken (gen_midi_map.py reports 0 free), and for the two
+# that want continuous control the mod matrix has SUB_PHASE and SUB_PW destinations, which
+# reach them at control-frame rate instead of MIDI rate.
+_SUB_DIVIDES = (
+    ("Off", 0),
+    ("1 - master rate (phase / PWM only)", 1),
+    ("2 - one octave down", 2),
+    ("3 - octave + fifth down", 3),
+    ("4 - two octaves down", 4),
+    ("5", 5),
+    ("6", 6),
+    ("7", 7),
+    ("8 - three octaves down", 8),
+)
+_SUB_LOGIC_OPS = (
+    ("Off", 0),
+    ("XOR - ring mod", 1),
+    ("AND", 2),
+    ("OR", 3),
+    ("XNOR", 4),
+    ("NAND", 5),
+    ("NOR", 6),
+)
+_SUB_LOGIC_PAIRS = (
+    ("Subs 1 + 2", 0),
+    ("Subs 1 + 3", 1),
+    ("Subs 2 + 3", 2),
+)
+# What each sub pad carries: the plain square, or that square combined with its own
+# oscillator's reset pulse. 'Plain sub' is the identity table, so it is the pre-existing
+# behaviour rather than a mute.
+_SUB_MASTER_OPS = (
+    ("Plain sub", 0),
+    ("XOR - notch at the master rate", 1),
+    ("AND", 2),
+    ("OR", 3),
+    ("XNOR", 4),
+    ("NAND", 5),
+    ("NOR", 6),
 )
 
 
@@ -211,11 +259,17 @@ PARAMS: list[Param] = [
                "first flyback (EXACT_Y). Changing this retriggers all notes.",
           cc=23),
     Param(26, "Voice mode", GROUP_OSC, "combo", default=0,
-          choices=(("0 - mono", 0), ("1 - poly", 1), ("2 - stack", 2)), cc=69),
+          choices=(("0 - mono", 0), ("1 - poly", 1), ("2 - stack", 2)),
+          note="Mono (`0`) uses a last-note-priority held-note stack (overlapping keys; "
+               "release falls back and retriggers porta). See [`REFERENCE_AI.md`]"
+               "(REFERENCE_AI.md) (`note_on` / `note_off`).",
+          cc=69),
     Param(27, "Unison detune", GROUP_OSC, "slider", 0, 127, 0, cc=70),
     Param(18, "Portamento time", GROUP_OSC, "slider", 0, 255, 0, cc=71),
     Param(32, "Portamento mode", GROUP_OSC, "combo", default=0,
-          choices=(("0 - fixed time", 0), ("1 - slew rate", 1)), cc=72),
+          choices=(("0 - fixed time (same duration any interval)", 0),
+                   ("1 - slew rate (time scales with interval; knob = time per octave)", 1)),
+          cc=72),
     Param(28, "Analog drift amount", GROUP_OSC, "slider", 0, 127, 0, cc=73),
     Param(29, "Analog drift speed", GROUP_OSC, "slider", 1, 255, 1, cc=74),
     Param(30, "Analog drift spread", GROUP_OSC, "slider", 1, 127, 1, cc=75),
@@ -235,6 +289,46 @@ PARAMS: list[Param] = [
     Param(87, "OSC3 Saw enable", GROUP_OSC, "check", default=0, cc=115),
     Param(88, "OSC3 Pulse enable", GROUP_OSC, "check", default=0, cc=116),
     Param(89, "OSC3 Tri enable", GROUP_OSC, "check", default=0, cc=117),
+
+    # --- Sub-oscillators, one per oscillator (ENABLE_SUBOSC_ENGINE2) ---
+    # Each sub counts its own oscillator's flybacks, so its frequency is locked to that
+    # oscillator no matter what phase and width do. A build without the engine (RP2040) keeps
+    # the single fixed-50% sub: 'Sub 1 divide' then behaves exactly like 'Sub-oscillator
+    # divide' on the Oscillators tab, and everything else on this tab does nothing.
+    Param(102, "Combine with own osc", GROUP_SUB, "combo", default=0, choices=_SUB_MASTER_OPS,
+          note="each sub pad carries its square combined with its OWN oscillator's reset "
+               "pulse, which its state machine is already waiting on - no extra pin. The "
+               "pulse is a fraction of a percent of a master period, so XOR reads as the sub "
+               "with a narrow notch once per master period and AND as a narrow pulse train "
+               "gated by the sub. Notch width is the reset pulse length, a calibration value, "
+               "so shape it with divide / phase / width instead. One shared PIO image, so the "
+               "operator applies to all three voices at once"),
+    Param(90, "Sub 1 divide", GROUP_SUB, "combo", default=0, choices=_SUB_DIVIDES,
+          note="OSC1's sub; output on GP8, needs a mixer input on the carrier to be audible"),
+    Param(93, "Sub 1 phase", GROUP_SUB, "slider", 0, 359, 0,
+          note="rising edge delayed this many degrees of the MASTER period, not the sub "
+               "period - shifting a sub by whole master periods is inaudible"),
+    Param(96, "Sub 1 width", GROUP_SUB, "slider", 1, 255, 128,
+          note="duty in 1/256ths of the sub period; 128 is the classic 50% square"),
+    Param(91, "Sub 2 divide", GROUP_SUB, "combo", default=0, choices=_SUB_DIVIDES,
+          note="OSC2's sub; output on GP9"),
+    Param(94, "Sub 2 phase", GROUP_SUB, "slider", 0, 359, 0),
+    Param(97, "Sub 2 width", GROUP_SUB, "slider", 1, 255, 128),
+    Param(92, "Sub 3 divide", GROUP_SUB, "combo", default=0, choices=_SUB_DIVIDES,
+          note="OSC3's sub; output on GP10"),
+    Param(95, "Sub 3 phase", GROUP_SUB, "slider", 0, 359, 0),
+    Param(98, "Sub 3 width", GROUP_SUB, "slider", 1, 255, 128),
+    Param(99, "Logic combiner", GROUP_SUB, "combo", default=0, choices=_SUB_LOGIC_OPS,
+          note="bitwise combination of two subs, out on GP26 - XOR is digital ring "
+               "modulation. Both subs need a divide above Off to make an edge for it to work "
+               "with; 'Sub-osc engine report' on the Diagnostics tab shows what it is doing. "
+               "It reads the sub pads, so with 'Combine with own osc' set it combines two "
+               "already-combined signals"),
+    Param(100, "Logic combiner inputs", GROUP_SUB, "combo", default=0, choices=_SUB_LOGIC_PAIRS,
+          note="subs 1+2 (GP8/GP9) and subs 2+3 (GP9/GP10) are on adjacent pads, which is what "
+               "the combiner's two-bit read needs; subs 1+3 (GP8/GP10) never can be, since "
+               "three distinct pins can only chain two of their three pairs adjacent. All six "
+               "operators are symmetric, so order within a pair does not matter"),
 
     # --- Envelopes (curves and routing; times live in the a/b/c blocks) ---
     Param(222, "ADSR1 to VCA", GROUP_ENV, "slider", 0, 512, 512, cc=48),
@@ -294,7 +388,11 @@ PARAMS: list[Param] = [
     Param(16, "LFO2 to OSC2 detune", GROUP_LFO, "slider", 0, 255, 0, cc=67),
     Param(35, "LFO2 to OSC3 detune", GROUP_LFO, "slider", 0, 255, 0, cc=68),
     Param(219, "LFO2 to OSC2 coarse", GROUP_LFO, "slider", 0, 511, 0, cc=119),
-    Param(220, "LFO2 to OSC3 coarse", GROUP_LFO, "slider", 0, 511, 0, cc=120),
+    # No CC: 120 is the All Sound Off channel-mode message, so a DAW panic button would have
+    # slammed this to a value. Nothing else is free (gen_midi_map.py reports 0 remaining), and
+    # the mod matrix reaches osc pitch anyway, so it stays panel-only rather than displacing
+    # another assignment.
+    Param(220, "LFO2 to OSC3 coarse", GROUP_LFO, "slider", 0, 511, 0),
 
     # --- Mod matrix (ParamIds 60–83; see DCO/docs/MOD_MATRIX.md) ---
     # CCs skip reserved 98–101.
@@ -384,6 +482,7 @@ BLOCKS: list[Block] = [
 # pushes a fresh divider every frame for a held note.
 DEBUG_COMMANDS = (
     ("PIO topology report", 1),
+    ("Sub-osc engine report", 4),
     ("Period probe, clk_div 2000", 2),
     ("Period probe, clk_div 20000", 3),
     ("Dump RAM (heap/stack)", 13),

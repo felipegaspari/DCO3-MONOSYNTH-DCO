@@ -110,6 +110,12 @@ void pio_solve_period_model(uint32_t clk_div_a, double measured_hz_a,
 void pio_defer_request_sync_mode();
 void pio_defer_request_reset_pulse_all();
 void pio_defer_request_subosc(uint8_t divide);
+#ifdef ENABLE_SUBOSC_ENGINE2
+void pio_defer_request_subosc_divide(uint8_t osc, uint8_t divide);
+void pio_defer_request_subosc_logic_op(uint8_t op);
+void pio_defer_request_subosc_logic_pair(uint8_t pair);
+void pio_defer_request_subosc_master_op(uint8_t op);
+#endif
 void pio_defer_request_period_probe(uint8_t osc, uint32_t clk_div);
 void pio_defer_service();
 

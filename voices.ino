@@ -823,6 +823,14 @@ void __not_in_flash_func(voice_task_fixed_point)() {
       osc_last_clk_div[DCO_C] = clk_div3;
       BENCH_END(vt_pio_write);
 
+#ifdef ENABLE_SUBOSC_ENGINE2
+      // Each sub counts flybacks on its own oscillator's RESET pin, so it needs that
+      // oscillator's period, not this voice's DCO_A period.
+      BENCH_BEGIN(vt_subosc);
+      subosc2_update_periods(DCO_A, total_cycles1, DCO_B, total_cycles2, DCO_C, total_cycles3);
+      BENCH_END(vt_subosc);
+#endif
+
       // Mono: A+B oscSync retrig + RANGE A/B/C. Para: osc k only, no oscSync.
       if (voiceMode == 0) {
       if (note_on_flag_flag[i]) {
@@ -1502,6 +1510,14 @@ void __not_in_flash_func(voice_task_float)() {
       osc_last_clk_div[DCO_B] = clk_div2;
       osc_last_clk_div[DCO_C] = clk_div3;
       BENCH_END(vt_pio_write);
+
+#ifdef ENABLE_SUBOSC_ENGINE2
+      // Each sub counts flybacks on its own oscillator's RESET pin, so it needs that
+      // oscillator's period, not this voice's DCO_A period.
+      BENCH_BEGIN(vt_subosc);
+      subosc2_update_periods(DCO_A, total_cycles1, DCO_B, total_cycles2, DCO_C, total_cycles3);
+      BENCH_END(vt_subosc);
+#endif
 
       // Mono: A+B oscSync retrig + RANGE A/B/C. Para: osc k only, no oscSync.
       if (voiceMode == 0) {

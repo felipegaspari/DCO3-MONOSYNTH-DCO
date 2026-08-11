@@ -121,6 +121,8 @@ static inline const char *bench_pitch_interp_mode_name() {
   X(vt_retrig_split,   1, BENCH_CYC, BENCH_T_RARE, BENCH_voice_task,    "retrig period split") \
   X(vt_chan_level,     1, BENCH_CYC, BENCH_T_MAIN, BENCH_voice_task,    "amp comp")            \
   X(vt_pio_write,      1, BENCH_CYC, BENCH_T_MAIN, BENCH_voice_task,    "PIO put/exec")        \
+  /* Sub-osc segment words (ENABLE_SUBOSC_ENGINE2); multiplies only, DMA does the pushing. */ \
+  X(vt_subosc,         1, BENCH_CYC, BENCH_T_MAIN, BENCH_voice_task,    "subosc segments")     \
   X(vt_note_retrig,    1, BENCH_CYC, BENCH_T_RARE, BENCH_voice_task,    "note-on retrigger")   \
   /* One SM-apply probe: fine MAIN slices mis-attribute cold XIP across load/jmp/enable. */ \
   X(vt_retrig_sm_apply,1, BENCH_CYC, BENCH_T_RARE, BENCH_vt_note_retrig,"retrig SM apply")     \

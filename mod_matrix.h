@@ -42,7 +42,12 @@ enum ModDest : uint8_t {
   MOD_DEST_VCF_CUTOFF = 7,
   MOD_DEST_DIST_MIX = 8,
   MOD_DEST_PITCH = 9,
-  MOD_DEST_COUNT = 10
+  // Sub-oscillator shape, applied to all three subs at once (ENABLE_SUBOSC_ENGINE2). Full
+  // depth sweeps one whole master period of phase / the whole duty range. Inert on builds
+  // without the engine; the IDs are kept stable for the panel either way.
+  MOD_DEST_SUB_PHASE = 10,
+  MOD_DEST_SUB_PW = 11,
+  MOD_DEST_COUNT = 12
 };
 
 // Shared pitch dest: ±1023 depth → ±1.0 octave (Q24 octave-fraction). Latched ~10 kHz.
@@ -69,6 +74,11 @@ void mod_matrix_accumulate(int32_t dest_sums[MOD_DEST_COUNT], int16_t lfo1_q15, 
 
 // Pitch dest only → Q24 (no dest_sums). 0 if no live pitch slot.
 int32_t mod_matrix_eval_pitch_q24(int16_t lfo1_q15, int16_t lfo2_q15);
+
+// Sub-oscillator dests only → subosc_mod_phase / subosc_mod_pw, in matrix ±1023 units.
+// Same reason eval_pitch exists: without ENABLE_CV_OUTS nobody calls accumulate, and the sub
+// engine consumes these once per control frame rather than per CV update.
+void mod_matrix_eval_subosc(int16_t lfo1_q15, int16_t lfo2_q15);
 
 // ±1023 pitch dest sum → Q24 octave (mul/shift, no hot /1023).
 int32_t mod_matrix_pitch_to_q24(int32_t pitch_s);

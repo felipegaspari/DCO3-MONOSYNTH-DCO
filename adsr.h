@@ -1,7 +1,7 @@
 #ifndef __ADSR_H__
 #define __ADSR_H__
 
-#define ADSR_1_DACSIZE 4000
+#define ADSR_1_DACSIZE 4096
 
 #define ARRAY_SIZE 512
 

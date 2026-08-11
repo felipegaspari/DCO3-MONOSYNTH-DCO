@@ -474,8 +474,8 @@
                 "html": "Portamento mode",
                 "css": "> .html { white-space: normal; line-height: 1.15em; font-size: 85%; }",
                 "values": {
-                  "0 - fixed time ": 0,
-                  "1 - slew rate ": 1
+                  "0 - fixed time (same duration any interval) ": 0,
+                  "1 - slew rate (time scales with interval; knob = time per octave) ": 1
                 }
               }
             ]
@@ -1107,6 +1107,45 @@
         "widgets": [
           {
             "type": "panel",
+            "id": "cell_cc48_adsr1_to_vca",
+            "layout": "vertical",
+            "scroll": false,
+            "innerPadding": false,
+            "padding": 4,
+            "css": "grid-row: span 5;",
+            "widgets": [
+              {
+                "type": "knob",
+                "id": "cc48_adsr1_to_vca",
+                "address": "/control",
+                "preArgs": [
+                  1,
+                  48
+                ],
+                "target": "midi:dco3",
+                "default": 127,
+                "expand": true,
+                "html": "ADSR1 to VCA",
+                "css": "> .html { white-space: normal; line-height: 1.15em; font-size: 85%; }",
+                "range": {
+                  "min": 0,
+                  "max": 127
+                },
+                "decimals": 0,
+                "doubleTap": true,
+                "pips": false
+              },
+              {
+                "type": "text",
+                "id": "val_cc48_adsr1_to_vca",
+                "value": "#{ Math.floor((512 * Math.round(@{cc48_adsr1_to_vca}) + 63) / 127) }",
+                "height": 20,
+                "css": "font-size: 95%; opacity: 0.65;"
+              }
+            ]
+          },
+          {
+            "type": "panel",
             "id": "cell_cc24_envdco_adsr3_enabled",
             "layout": "vertical",
             "scroll": false,
@@ -1216,7 +1255,7 @@
             "css": "grid-row: span 5;",
             "widgets": [
               {
-                "type": "knob",
+                "type": "menu",
                 "id": "cc27_adsr1_attack_curve",
                 "address": "/control",
                 "preArgs": [
@@ -1228,20 +1267,16 @@
                 "expand": true,
                 "html": "ADSR1 attack curve",
                 "css": "> .html { white-space: normal; line-height: 1.15em; font-size: 85%; }",
-                "range": {
-                  "min": 0,
-                  "max": 127
-                },
-                "decimals": 0,
-                "doubleTap": true,
-                "pips": false
-              },
-              {
-                "type": "text",
-                "id": "val_cc27_adsr1_attack_curve",
-                "value": "#{ Math.floor((7 * Math.round(@{cc27_adsr1_attack_curve}) + 63) / 127) }",
-                "height": 20,
-                "css": "font-size: 95%; opacity: 0.65;"
+                "values": {
+                  "0 - EXP ": 0,
+                  "1 - SOFT ": 1,
+                  "2 - STEEP ": 2,
+                  "3 - CONCAVE ": 3,
+                  "4 - FAST S ": 4,
+                  "5 - SLOW THEN LIN ": 5,
+                  "6 - ALMOST LIN ": 6,
+                  "7 - LINEAR ": 7
+                }
               }
             ]
           },
@@ -1255,7 +1290,7 @@
             "css": "grid-row: span 5;",
             "widgets": [
               {
-                "type": "knob",
+                "type": "menu",
                 "id": "cc28_adsr1_decay_curve",
                 "address": "/control",
                 "preArgs": [
@@ -1267,20 +1302,16 @@
                 "expand": true,
                 "html": "ADSR1 decay curve",
                 "css": "> .html { white-space: normal; line-height: 1.15em; font-size: 85%; }",
-                "range": {
-                  "min": 0,
-                  "max": 127
-                },
-                "decimals": 0,
-                "doubleTap": true,
-                "pips": false
-              },
-              {
-                "type": "text",
-                "id": "val_cc28_adsr1_decay_curve",
-                "value": "#{ Math.floor((7 * Math.round(@{cc28_adsr1_decay_curve}) + 63) / 127) }",
-                "height": 20,
-                "css": "font-size: 95%; opacity: 0.65;"
+                "values": {
+                  "0 - EXP ": 0,
+                  "1 - SOFT ": 1,
+                  "2 - STEEP ": 2,
+                  "3 - CONVEX ": 3,
+                  "4 - FAST START S ": 4,
+                  "5 - SLOW THEN LIN ": 5,
+                  "6 - FAST THEN LIN ": 6,
+                  "7 - ALMOST LIN ": 7
+                }
               }
             ]
           },
@@ -1294,7 +1325,7 @@
             "css": "grid-row: span 5;",
             "widgets": [
               {
-                "type": "knob",
+                "type": "menu",
                 "id": "cc29_adsr2_attack_curve",
                 "address": "/control",
                 "preArgs": [
@@ -1306,20 +1337,16 @@
                 "expand": true,
                 "html": "ADSR2 attack curve",
                 "css": "> .html { white-space: normal; line-height: 1.15em; font-size: 85%; }",
-                "range": {
-                  "min": 0,
-                  "max": 127
-                },
-                "decimals": 0,
-                "doubleTap": true,
-                "pips": false
-              },
-              {
-                "type": "text",
-                "id": "val_cc29_adsr2_attack_curve",
-                "value": "#{ Math.floor((7 * Math.round(@{cc29_adsr2_attack_curve}) + 63) / 127) }",
-                "height": 20,
-                "css": "font-size: 95%; opacity: 0.65;"
+                "values": {
+                  "0 - EXP ": 0,
+                  "1 - SOFT ": 1,
+                  "2 - STEEP ": 2,
+                  "3 - CONCAVE ": 3,
+                  "4 - FAST S ": 4,
+                  "5 - SLOW THEN LIN ": 5,
+                  "6 - ALMOST LIN ": 6,
+                  "7 - LINEAR ": 7
+                }
               }
             ]
           },
@@ -1333,7 +1360,7 @@
             "css": "grid-row: span 5;",
             "widgets": [
               {
-                "type": "knob",
+                "type": "menu",
                 "id": "cc30_adsr2_decay_curve",
                 "address": "/control",
                 "preArgs": [
@@ -1345,20 +1372,16 @@
                 "expand": true,
                 "html": "ADSR2 decay curve",
                 "css": "> .html { white-space: normal; line-height: 1.15em; font-size: 85%; }",
-                "range": {
-                  "min": 0,
-                  "max": 127
-                },
-                "decimals": 0,
-                "doubleTap": true,
-                "pips": false
-              },
-              {
-                "type": "text",
-                "id": "val_cc30_adsr2_decay_curve",
-                "value": "#{ Math.floor((7 * Math.round(@{cc30_adsr2_decay_curve}) + 63) / 127) }",
-                "height": 20,
-                "css": "font-size: 95%; opacity: 0.65;"
+                "values": {
+                  "0 - EXP ": 0,
+                  "1 - SOFT ": 1,
+                  "2 - STEEP ": 2,
+                  "3 - CONVEX ": 3,
+                  "4 - FAST START S ": 4,
+                  "5 - SLOW THEN LIN ": 5,
+                  "6 - FAST THEN LIN ": 6,
+                  "7 - ALMOST LIN ": 7
+                }
               }
             ]
           },
@@ -1908,52 +1931,6 @@
                 "css": "font-size: 95%; opacity: 0.65;"
               }
             ]
-          },
-          {
-            "type": "text",
-            "id": "head_envvca_to_vca_amount",
-            "value": "ENVVCA TO VCA AMOUNT",
-            "align": "left bottom",
-            "css": "grid-column: 1 / -1; font-weight: bold; font-size: 90%; opacity: 0.55;"
-          },
-          {
-            "type": "panel",
-            "id": "cell_cc48_adsr1_to_vca",
-            "layout": "vertical",
-            "scroll": false,
-            "innerPadding": false,
-            "padding": 4,
-            "css": "grid-row: span 5;",
-            "widgets": [
-              {
-                "type": "knob",
-                "id": "cc48_adsr1_to_vca",
-                "address": "/control",
-                "preArgs": [
-                  1,
-                  48
-                ],
-                "target": "midi:dco3",
-                "default": 127,
-                "expand": true,
-                "html": "ADSR1 to VCA",
-                "css": "> .html { white-space: normal; line-height: 1.15em; font-size: 85%; }",
-                "range": {
-                  "min": 0,
-                  "max": 127
-                },
-                "decimals": 0,
-                "doubleTap": true,
-                "pips": false
-              },
-              {
-                "type": "text",
-                "id": "val_cc48_adsr1_to_vca",
-                "value": "#{ Math.floor((512 * Math.round(@{cc48_adsr1_to_vca}) + 63) / 127) }",
-                "height": 20,
-                "css": "font-size: 95%; opacity: 0.65;"
-              }
-            ]
           }
         ]
       },
@@ -2363,6 +2340,45 @@
         "widgets": [
           {
             "type": "panel",
+            "id": "cell_cc59_pulse_width",
+            "layout": "vertical",
+            "scroll": false,
+            "innerPadding": false,
+            "padding": 4,
+            "css": "grid-row: span 5;",
+            "widgets": [
+              {
+                "type": "knob",
+                "id": "cc59_pulse_width",
+                "address": "/control",
+                "preArgs": [
+                  1,
+                  59
+                ],
+                "target": "midi:dco3",
+                "default": 64,
+                "expand": true,
+                "html": "Pulse width",
+                "css": "> .html { white-space: normal; line-height: 1.15em; font-size: 85%; }",
+                "range": {
+                  "min": 0,
+                  "max": 127
+                },
+                "decimals": 0,
+                "doubleTap": true,
+                "pips": false
+              },
+              {
+                "type": "text",
+                "id": "val_cc59_pulse_width",
+                "value": "#{ Math.floor((4095 * Math.round(@{cc59_pulse_width}) + 63) / 127) }",
+                "height": 20,
+                "css": "font-size: 95%; opacity: 0.65;"
+              }
+            ]
+          },
+          {
+            "type": "panel",
             "id": "cell_cc56_lfo2_to_pw",
             "layout": "vertical",
             "scroll": false,
@@ -2465,52 +2481,6 @@
                   "Off ": 0,
                   "On ": 127
                 }
-              }
-            ]
-          },
-          {
-            "type": "text",
-            "id": "head_pulse_width",
-            "value": "PULSE WIDTH",
-            "align": "left bottom",
-            "css": "grid-column: 1 / -1; font-weight: bold; font-size: 90%; opacity: 0.55;"
-          },
-          {
-            "type": "panel",
-            "id": "cell_cc59_pw",
-            "layout": "vertical",
-            "scroll": false,
-            "innerPadding": false,
-            "padding": 4,
-            "css": "grid-row: span 5;",
-            "widgets": [
-              {
-                "type": "knob",
-                "id": "cc59_pw",
-                "address": "/control",
-                "preArgs": [
-                  1,
-                  59
-                ],
-                "target": "midi:dco3",
-                "default": 64,
-                "expand": true,
-                "html": "PW",
-                "css": "> .html { white-space: normal; line-height: 1.15em; font-size: 85%; }",
-                "range": {
-                  "min": 0,
-                  "max": 127
-                },
-                "decimals": 0,
-                "doubleTap": true,
-                "pips": false
-              },
-              {
-                "type": "text",
-                "id": "val_cc59_pw",
-                "value": "#{ Math.floor((4095 * Math.round(@{cc59_pw}) + 63) / 127) }",
-                "height": 20,
-                "css": "font-size: 95%; opacity: 0.65;"
               }
             ]
           }
@@ -2941,6 +2911,45 @@
                 "css": "font-size: 95%; opacity: 0.65;"
               }
             ]
+          },
+          {
+            "type": "panel",
+            "id": "cell_cc119_lfo2_to_osc2_coarse",
+            "layout": "vertical",
+            "scroll": false,
+            "innerPadding": false,
+            "padding": 4,
+            "css": "grid-row: span 5;",
+            "widgets": [
+              {
+                "type": "knob",
+                "id": "cc119_lfo2_to_osc2_coarse",
+                "address": "/control",
+                "preArgs": [
+                  1,
+                  119
+                ],
+                "target": "midi:dco3",
+                "default": 0,
+                "expand": true,
+                "html": "LFO2 to OSC2 coarse",
+                "css": "> .html { white-space: normal; line-height: 1.15em; font-size: 85%; }",
+                "range": {
+                  "min": 0,
+                  "max": 127
+                },
+                "decimals": 0,
+                "doubleTap": true,
+                "pips": false
+              },
+              {
+                "type": "text",
+                "id": "val_cc119_lfo2_to_osc2_coarse",
+                "value": "#{ Math.floor((511 * Math.round(@{cc119_lfo2_to_osc2_coarse}) + 63) / 127) }",
+                "height": 20,
+                "css": "font-size: 95%; opacity: 0.65;"
+              }
+            ]
           }
         ]
       },
@@ -3030,7 +3039,9 @@
                   "6 Dist Drive ": 6,
                   "7 VCF cutoff ": 7,
                   "8 Dist Mix ": 8,
-                  "9 Pitch ": 9
+                  "9 Pitch (\u00b11 oct @ \u00b11023) ": 9,
+                  "10 Sub phase (all subs) ": 10,
+                  "11 Sub pulse width (all subs) ": 11
                 }
               }
             ]
@@ -3150,7 +3161,9 @@
                   "6 Dist Drive ": 6,
                   "7 VCF cutoff ": 7,
                   "8 Dist Mix ": 8,
-                  "9 Pitch ": 9
+                  "9 Pitch (\u00b11 oct @ \u00b11023) ": 9,
+                  "10 Sub phase (all subs) ": 10,
+                  "11 Sub pulse width (all subs) ": 11
                 }
               }
             ]
@@ -3270,7 +3283,9 @@
                   "6 Dist Drive ": 6,
                   "7 VCF cutoff ": 7,
                   "8 Dist Mix ": 8,
-                  "9 Pitch ": 9
+                  "9 Pitch (\u00b11 oct @ \u00b11023) ": 9,
+                  "10 Sub phase (all subs) ": 10,
+                  "11 Sub pulse width (all subs) ": 11
                 }
               }
             ]
@@ -3390,7 +3405,9 @@
                   "6 Dist Drive ": 6,
                   "7 VCF cutoff ": 7,
                   "8 Dist Mix ": 8,
-                  "9 Pitch ": 9
+                  "9 Pitch (\u00b11 oct @ \u00b11023) ": 9,
+                  "10 Sub phase (all subs) ": 10,
+                  "11 Sub pulse width (all subs) ": 11
                 }
               }
             ]
@@ -3510,7 +3527,9 @@
                   "6 Dist Drive ": 6,
                   "7 VCF cutoff ": 7,
                   "8 Dist Mix ": 8,
-                  "9 Pitch ": 9
+                  "9 Pitch (\u00b11 oct @ \u00b11023) ": 9,
+                  "10 Sub phase (all subs) ": 10,
+                  "11 Sub pulse width (all subs) ": 11
                 }
               }
             ]
@@ -3630,7 +3649,9 @@
                   "6 Dist Drive ": 6,
                   "7 VCF cutoff ": 7,
                   "8 Dist Mix ": 8,
-                  "9 Pitch ": 9
+                  "9 Pitch (\u00b11 oct @ \u00b11023) ": 9,
+                  "10 Sub phase (all subs) ": 10,
+                  "11 Sub pulse width (all subs) ": 11
                 }
               }
             ]
@@ -3750,7 +3771,9 @@
                   "6 Dist Drive ": 6,
                   "7 VCF cutoff ": 7,
                   "8 Dist Mix ": 8,
-                  "9 Pitch ": 9
+                  "9 Pitch (\u00b11 oct @ \u00b11023) ": 9,
+                  "10 Sub phase (all subs) ": 10,
+                  "11 Sub pulse width (all subs) ": 11
                 }
               }
             ]
@@ -3870,7 +3893,9 @@
                   "6 Dist Drive ": 6,
                   "7 VCF cutoff ": 7,
                   "8 Dist Mix ": 8,
-                  "9 Pitch ": 9
+                  "9 Pitch (\u00b11 oct @ \u00b11023) ": 9,
+                  "10 Sub phase (all subs) ": 10,
+                  "11 Sub pulse width (all subs) ": 11
                 }
               }
             ]

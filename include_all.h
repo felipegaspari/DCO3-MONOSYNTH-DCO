@@ -33,6 +33,7 @@
 #include "midi.h"
 #include "voices.h"
 #include "state_machines.h"
+#include "subosc.h"
 #include "PWM.h"
 #include "utils.h"
 #include "noise.h"

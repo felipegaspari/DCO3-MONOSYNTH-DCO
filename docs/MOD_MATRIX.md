@@ -63,8 +63,14 @@ EnvVCA (ADSR1) and EnvVCF (ADSR2) stay on fixed buses only.
 | 7 | VCF cutoff | RP2350 | Add to shared `CUTOFF` sum → both filter cutoff paths |
 | 8 | Dist Mix | RP2040 aux / solo DCO | Add to panel `DIST_MIX` |
 | 9 | Pitch | RP2350 / DCO voice | Shared OSC1/2/3; Q24 octave-fraction into `modifiersBase` (with pitch bend). **Depth ±1023 → ±1.0 oct** (clamped); dual-bus with `LFO1toDCO` / EnvDCO |
+| 10 | Sub phase | RP2350 (`ENABLE_SUBOSC_ENGINE2`) | All three subs; matrix ±1023 → one master period of phase (wraps). Inert without engine2 |
+| 11 | Sub pulse width | RP2350 (`ENABLE_SUBOSC_ENGINE2`) | All three subs; matrix ±1023 → full duty range (clamps 1..255). Inert without engine2 |
 
 Pitch is latched from `dest_sums[9]` in `update_CV_outs()` → `matrix_pitch_mod_q24`; not applied via `mod_matrix_apply_cv`.
+
+Sub phase / PW are **not** written through `mod_matrix_apply_cv`. `mod_matrix_eval_subosc()`
+(called from `subosc2_update_periods()` each control frame) accumulates only those slots into
+`subosc_mod_phase` / `subosc_mod_pw`, so they still work when `ENABLE_CV_OUTS` is off.
 
 ---
 
@@ -84,7 +90,7 @@ Mirrored in DCO / Input / Screen / VOICE-AUX `params_def.h`. Names: `PARAM_MOD_S
 
 ## Runtime
 
-- **DCO:** [`mod_matrix.ino`](../mod_matrix.ino) — `mod_matrix_accumulate()` then `mod_matrix_apply_cv()` from `update_CV_outs()` (~10 kHz with ADSR). Cutoff sum applied before VCF PWM math. Skipped under manual calibration.
+- **DCO:** [`mod_matrix.ino`](../mod_matrix.ino) — `mod_matrix_accumulate()` then `mod_matrix_apply_cv()` from `update_CV_outs()` (~10 kHz with ADSR). Cutoff sum applied before VCF PWM math. Skipped under manual calibration. Sub dests: `mod_matrix_eval_subosc()` from the sub engine once per voice control frame.
 - **VOICE-AUX:** same ParamIds; dest 6 (Dist Drive) and dest 8 (Dist Mix) in `mod_matrix_apply_dist()` each `loop()`.
 - Level panel applies update **bases only**; PWM is written after the matrix sum.
 

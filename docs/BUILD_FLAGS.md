@@ -27,6 +27,7 @@ Unless overridden, RP2350 and RP2040 ship the same engine shape:
 | ADSR | fixed Q22 phase, micros, native Q15 |
 | USB panel | `ENABLE_USB_CONTROL` on |
 | CV / mux / aux HW | off (`ENABLE_CV_OUTS` / `WAVE_MUX` / `VOICE_AUX` commented) |
+| Sub-osc engine2 | **on RP2350**, unavailable RP2040 (`ENABLE_SUBOSC_ENGINE2`) |
 | PIO RESET | `ENABLE_PIO_RESET_INVERT` on |
 | RANGE amp PWM | `RANGE0_PIO_DITHER_TEST` on (PIO dither; comment out = slice PWM) |
 | Profiler (tree as checked in) | `RUNNING_AVERAGE` + `RUNNING_AVERAGE_PERIOD` on; FINE off |
@@ -106,6 +107,7 @@ Pitch interp cmds **28–29** and fixed clkdiv cmds **32–33** (`CLKDIV_MODE` A
 | `ENABLE_WAVE_MUX` | off | Wave mux GPIO / shift-register path | globals pin block, wave mux |
 | `ENABLE_VOICE_AUX` | off | Skip local Dist/filter writers (aux owns them) | [`PWM.ino`](../PWM.ino), globals |
 | `ENABLE_PIO_RESET_INVERT` | **on** | Active-low RESET pad via GPIO OVER | [`state_machines.ino`](../state_machines.ino) |
+| `ENABLE_SUBOSC_ENGINE2` | **on RP2350**; off / `#error` on RP2040 | Per-osc sub on pio2 (`subosc_seg` + DMA) with per-voice master combine, plus boolean combiner SM3; `#undef` to A/B classic pio1 sub | [`subosc.h`](../subosc.h) / [`subosc.ino`](../subosc.ino), [`PIO_OSCILLATORS.md`](PIO_OSCILLATORS.md) §9, [`PINOUT.md`](PINOUT.md) |
 | `RANGE0_PIO_DITHER_TEST` | **on** | All `RANGE_PINS[]` via PIO dither PWM; comment out = HW slice `wrap=DIV_COUNTER` | [`PWM.h`](../PWM.h) / [`PWM.ino`](../PWM.ino), [`autotune.ino`](../autotune.ino), `setup1()` |
 | `NOTE_RETRIG_MODE_DEFAULT` | `0` (EXACT_Y) | Note-on sync retrig default; runtime 26/27 | [`globals.h`](../globals.h) |
 
@@ -150,7 +152,9 @@ Derived: `ADSR_BEZIER_PHASE_SCALE_U64` (`1` when shift > 22).
 | `USE_ADC_STACK_VOICES` | commented | Legacy ADC stack voices (GPIO 28) | unused when commented |
 | `USE_ADC_DETUNE` | commented | Legacy ADC detune (GPIO 27) | unused when commented |
 
-Comment-only (not a live define): `ENABLE_PIO_MIDI` — PIO2 reserved in comments / [`PINOUT.md`](PINOUT.md); not compiled today.
+Comment-only (not a live define): `ENABLE_PIO_MIDI` — not compiled today. With
+`ENABLE_SUBOSC_ENGINE2`, pio1 SM0 is free for it; without engine2, PIO2 was the reserved
+block (classic sub occupies pio1 SM0). See [`PINOUT.md`](PINOUT.md) / [`PIO_OSCILLATORS.md`](PIO_OSCILLATORS.md) §3.2.
 
 ### Capacity constants (not feature toggles)
 

@@ -8,6 +8,7 @@ static uint8_t mod_wheel = 0;
 // Bit i set when slot i has source, dest, nonzero depth. Hot path skips empty matrix.
 static uint8_t g_mod_live_mask = 0;
 static uint8_t g_mod_pitch_mask = 0;
+static uint8_t g_mod_subosc_mask = 0;
 
 static void mod_refresh_slot_live(uint8_t slot) {
   const ModSlot& s = g_mod_slots[slot];
@@ -21,9 +22,15 @@ static void mod_refresh_slot_live(uint8_t slot) {
     } else {
       g_mod_pitch_mask &= (uint8_t)~bit;
     }
+    if (s.dest == MOD_DEST_SUB_PHASE || s.dest == MOD_DEST_SUB_PW) {
+      g_mod_subosc_mask |= bit;
+    } else {
+      g_mod_subosc_mask &= (uint8_t)~bit;
+    }
   } else {
     g_mod_live_mask &= (uint8_t)~bit;
     g_mod_pitch_mask &= (uint8_t)~bit;
+    g_mod_subosc_mask &= (uint8_t)~bit;
   }
 }
 
@@ -60,6 +67,9 @@ void mod_matrix_init() {
   }
   g_mod_live_mask = 0;
   g_mod_pitch_mask = 0;
+  g_mod_subosc_mask = 0;
+  subosc_mod_phase = 0;
+  subosc_mod_pw = 0;
   mod_random_snh_q15 = 0;
   mod_aftertouch = 0;
   mod_wheel = 0;
@@ -184,6 +194,29 @@ int32_t __not_in_flash_func(mod_matrix_eval_pitch_q24)(int16_t lfo1_q15, int16_t
     pitch_s += mod_depth_mul_q15(src_q15, s.depth);
   }
   return mod_matrix_pitch_to_q24(pitch_s);
+}
+
+// Sub phase and PW, left in matrix units for subosc_compute_words() to scale and clamp. Both
+// are always assigned, so clearing the last slot that targeted them clears the offset too.
+void __not_in_flash_func(mod_matrix_eval_subosc)(int16_t lfo1_q15, int16_t lfo2_q15) {
+  int32_t phase_s = 0;
+  int32_t pw_s = 0;
+  uint8_t mask = g_mod_subosc_mask;
+  for (uint8_t i = 0; mask != 0; i++, mask >>= 1) {
+    if ((mask & 1u) == 0) {
+      continue;
+    }
+    const ModSlot& s = g_mod_slots[i];
+    const int32_t src_q15 = mod_matrix_read_source_q15(s.source, lfo1_q15, lfo2_q15);
+    const int32_t amount = mod_depth_mul_q15(src_q15, s.depth);
+    if (s.dest == MOD_DEST_SUB_PHASE) {
+      phase_s += amount;
+    } else {
+      pw_s += amount;
+    }
+  }
+  subosc_mod_phase = phase_s;
+  subosc_mod_pw = pw_s;
 }
 
 // Convert clamped pitch dest sum (±1023) to Q24 octave without a hot divide.

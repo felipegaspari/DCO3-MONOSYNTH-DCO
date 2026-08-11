@@ -60,7 +60,9 @@ void init_pio() {
   for (int sm = 0; sm < NUM_OSCILLATORS; sm++) {
     pio_sm_claim(pio[0], sm);
   }
+#ifndef ENABLE_SUBOSC_ENGINE2
   pio_sm_claim(pio[SUBOSC_PIO], SUBOSC_SM);
+#endif
   pio_sm_claim(pio[NOISE_PIO], NOISE_SM);
 
   // Free-running program plus one soft-sync poll image (default N=1). Switching hard↔soft
@@ -70,10 +72,14 @@ void init_pio() {
   ensure_soft_sync_program(softSyncChunks > 0 ? softSyncChunks : 1);
 
   // pio1: noise LFSR must load first at origin 0 (out pc,1 XOR); then sub-osc.
-  // pio2 stays free for ENABLE_PIO_MIDI.
+  // With ENABLE_SUBOSC_ENGINE2 the sub moves to pio2 and the div2/div4 images are not
+  // loaded at all, leaving pio1 SM0 and 12 instruction slots free (that is where
+  // ENABLE_PIO_MIDI belongs now). Otherwise pio2 stays free for it.
   noise_lfsr_offset = pio_add_program(pio[NOISE_PIO], &noise_lfsr_program);
+#ifndef ENABLE_SUBOSC_ENGINE2
   subosc_offset_div2 = pio_add_program(pio[SUBOSC_PIO], &subosc_div2_program);
   subosc_offset_div4 = pio_add_program(pio[SUBOSC_PIO], &subosc_div4_program);
+#endif
   if (dcoNoiseUsesPioWhite()) {
     const int out_pin =
 #ifdef ENABLE_NOISE_OUT
@@ -87,6 +93,9 @@ void init_pio() {
 
   assign_sm_mapping();
   start_voice_sms();
+#ifdef ENABLE_SUBOSC_ENGINE2
+  subosc2_init();
+#endif
   set_subosc_divide(subOscDivide);
 }
 
@@ -286,7 +295,17 @@ void pio_solve_period_model(uint32_t clk_div_a, double measured_hz_a,
 
 // (Re)configure the sub-oscillator. divide 0 stops it, 2 and 4 give a square one and
 // two octaves below OSC1. Needs SUBOSC_PIN wired to a mixer input to be audible.
+//
+// With ENABLE_SUBOSC_ENGINE2 there is one sub per oscillator and this legacy entry point
+// (PARAM_SUBOSC_DIVIDE, which predates the per-oscillator parameters) sets the same ratio on
+// all three. Subs whose pin is still unwired stay stopped either way.
 void set_subosc_divide(uint8_t divide) {
+#ifdef ENABLE_SUBOSC_ENGINE2
+  for (uint8_t osc = 0; osc < NUM_OSCILLATORS; osc++) {
+    subosc2_set_divide(osc, divide);
+  }
+  return;
+#else
   subOscDivide = divide;
 
   PIO p = pio[SUBOSC_PIO];
@@ -300,6 +319,7 @@ void set_subosc_divide(uint8_t divide) {
   subosc_init(p, SUBOSC_SM, div4 ? subosc_offset_div4 : subosc_offset_div2,
               RESET_PINS[0], SUBOSC_PIN, div4);
   pio_sm_set_enabled(p, SUBOSC_SM, true);
+#endif  // ENABLE_SUBOSC_ENGINE2
 }
 
 // ---- Core-0 → core-1 deferred PIO requests -----------------------------------
@@ -323,6 +343,23 @@ static constexpr uint8_t PIO_DEFER_SYNC   = 1u << 0;
 static constexpr uint8_t PIO_DEFER_RESET  = 1u << 1;
 static constexpr uint8_t PIO_DEFER_SUBOSC = 1u << 2;
 static constexpr uint8_t PIO_DEFER_PROBE  = 1u << 3;
+#ifdef ENABLE_SUBOSC_ENGINE2
+// Per-oscillator sub divides need one pending value each, plus a bit saying which arrived:
+// three sliders can move between two services and none of them should be lost.
+static constexpr uint8_t PIO_DEFER_SUBOSC2 = 1u << 4;
+static volatile uint8_t pio_defer_subosc2_divide[NUM_OSCILLATORS] = { 0, 0, 0 };
+static volatile uint8_t pio_defer_subosc2_mask = 0;
+// The combiner's operator and input pair are applied together, so both pending values live
+// here: core 0 can then set one without reading back the other from a global core 1 owns.
+// Both start where subOscLogicOp / subOscLogicPair do.
+static constexpr uint8_t PIO_DEFER_SUBOSC_LOGIC = 1u << 5;
+static volatile uint8_t pio_defer_subosc_logic_op = 0;
+static volatile uint8_t pio_defer_subosc_logic_pair = SUBOSC_LOGIC_PAIR_DEFAULT;
+// The per-voice master combine rewrites six words of the segment program's instruction
+// memory, which is core 1's to touch.
+static constexpr uint8_t PIO_DEFER_SUBOSC_MASTER = 1u << 6;
+static volatile uint8_t pio_defer_subosc_master_op = 0;
+#endif
 
 void setSyncMode();  // voices.ino — must run on core 1 only
 
@@ -339,6 +376,36 @@ void pio_defer_request_subosc(uint8_t divide) {
   __dmb();
   __atomic_fetch_or(&pio_defer_pending, PIO_DEFER_SUBOSC, __ATOMIC_SEQ_CST);
 }
+
+#ifdef ENABLE_SUBOSC_ENGINE2
+void pio_defer_request_subosc_divide(uint8_t osc, uint8_t divide) {
+  if (osc >= NUM_OSCILLATORS) {
+    return;
+  }
+  pio_defer_subosc2_divide[osc] = divide;
+  __dmb();
+  __atomic_fetch_or(&pio_defer_subosc2_mask, (uint8_t)(1u << osc), __ATOMIC_SEQ_CST);
+  __atomic_fetch_or(&pio_defer_pending, PIO_DEFER_SUBOSC2, __ATOMIC_SEQ_CST);
+}
+
+void pio_defer_request_subosc_logic_op(uint8_t op) {
+  pio_defer_subosc_logic_op = op;
+  __dmb();
+  __atomic_fetch_or(&pio_defer_pending, PIO_DEFER_SUBOSC_LOGIC, __ATOMIC_SEQ_CST);
+}
+
+void pio_defer_request_subosc_logic_pair(uint8_t pair) {
+  pio_defer_subosc_logic_pair = pair;
+  __dmb();
+  __atomic_fetch_or(&pio_defer_pending, PIO_DEFER_SUBOSC_LOGIC, __ATOMIC_SEQ_CST);
+}
+
+void pio_defer_request_subosc_master_op(uint8_t op) {
+  pio_defer_subosc_master_op = op;
+  __dmb();
+  __atomic_fetch_or(&pio_defer_pending, PIO_DEFER_SUBOSC_MASTER, __ATOMIC_SEQ_CST);
+}
+#endif
 
 void pio_defer_request_period_probe(uint8_t osc, uint32_t clk_div) {
   pio_defer_probe_osc = osc;
@@ -387,6 +454,22 @@ void pio_defer_service() {
   if (pending & PIO_DEFER_SUBOSC) {
     set_subosc_divide(pio_defer_subosc_value);
   }
+#ifdef ENABLE_SUBOSC_ENGINE2
+  if (pending & PIO_DEFER_SUBOSC2) {
+    const uint8_t mask = __atomic_exchange_n(&pio_defer_subosc2_mask, 0, __ATOMIC_SEQ_CST);
+    for (uint8_t osc = 0; osc < NUM_OSCILLATORS; osc++) {
+      if (mask & (1u << osc)) {
+        subosc2_set_divide(osc, pio_defer_subosc2_divide[osc]);
+      }
+    }
+  }
+  if (pending & PIO_DEFER_SUBOSC_LOGIC) {
+    subosc2_set_logic(pio_defer_subosc_logic_op, pio_defer_subosc_logic_pair);
+  }
+  if (pending & PIO_DEFER_SUBOSC_MASTER) {
+    subosc2_set_master_op(pio_defer_subosc_master_op);
+  }
+#endif
   if (pending & PIO_DEFER_PROBE) {
     const uint8_t osc = pio_defer_probe_osc;
     const uint32_t clk_div = pio_defer_probe_clk_div;

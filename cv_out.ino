@@ -15,7 +15,7 @@ static constexpr int32_t CV_LFO_Q15_PEAK_DIV = CV_PANEL_DEPTH_FULL * 2;  // 1024
 static constexpr int CV_VCA_COMP_DEFAULT = 100;
 static constexpr int CV_RESO_COMP_MAX_RESONANCE = 2300;
 static constexpr int CV_RESO_COMP_MIN_RESONANCE = 50;
-static constexpr int CV_RESO_COMP_MAX_VCA = 315;
+static constexpr int CV_RESO_COMP_MAX_VCA = 316;
 static constexpr int CV_RESO_COMP_SLOPE_Q8 = 36;  // ≈ 0.14 via (span * 36) >> 8
 
 // Always-on: divide by CV_U12_SCALE via >>12 (not /4095).

@@ -139,31 +139,51 @@ flowchart LR
 
 ### 3.2 Block budget
 
+**With `ENABLE_SUBOSC_ENGINE2` (RP2350 board default):**
+
 | Block | Contents | Instructions used |
 |-------|----------|-------------------|
 | **PIO0** | `frequency_sync_4_jumps` + one of `frequency_sync_poll{,_2,_3}` (+ `range_pwm_dither` when `RANGE0_PIO_DITHER_TEST`) | 25–27 of 32; **29–31** with RANGE dither |
-| **PIO1** | `noise_lfsr` (origin 0, SM1) + `subosc_div2` + `subosc_div4` (SM0) (+ `range_pwm_dither` when flag on) | 24 of 32; **28** with RANGE dither |
+| **PIO1** | `noise_lfsr` (origin 0, SM1) (+ `range_pwm_dither` when flag on). SM0 free — intended home for `ENABLE_PIO_MIDI` | 12 of 32; **16** with RANGE dither |
+| **PIO2** | `subosc_logic` at origin 0 (SM3) + `subosc_seg` at offset 8 (SM0..2, one per oscillator) | **30** of 32 |
+
+**Without `ENABLE_SUBOSC_ENGINE2` (RP2040, or `#undef` on RP2350):**
+
+| Block | Contents | Instructions used |
+|-------|----------|-------------------|
+| **PIO0** | same as above | 25–27 / 29–31 |
+| **PIO1** | `noise_lfsr` (origin 0, SM1) + `subosc_div2` + `subosc_div4` (SM0) (+ RANGE dither) | 24 of 32; **28** with RANGE dither |
 | **PIO2** | reserved for `ENABLE_PIO_MIDI` | 0 |
 
 Only one soft-sync poll image is resident at a time. Changing `softSyncChunks` among 1/2/3
 reloads that image via `pio_remove_program` / `pio_add_program` (section 7.4).
 
 With `RANGE0_PIO_DITHER_TEST`, the same 4-inst RANGE program is loaded on **pio0 and pio1**.
-SMs: pio1 SM2/SM3 (RANGE osc0/1), pio0 SM3 (RANGE osc2). Voice SMs stay pio0 SM0–2; subosc/noise stay pio1 SM0/SM1.
+SMs: pio1 SM2/SM3 (RANGE osc0/1), pio0 SM3 (RANGE osc2). Voice SMs stay pio0 SM0–2.
+Noise stays pio1 SM1. Classic sub uses pio1 SM0; engine2 moves all three subs + the logic
+combiner onto pio2 (section 9).
+
+DMA: engine2 claims **6** channels (data+ctrl per wired sub). RANGE dither claims another 6.
+Together that is 12 of the RP2350's 16 DMA channels.
 
 ### 3.3 Pins
 
 | Signal | GPIO | Direction |
 |--------|------|-----------|
-| OSC1 RESET | 29 | PIO0 out |
-| OSC2 RESET | 27 | PIO0 out |
-| OSC3 RESET | 19 | PIO0 out |
-| Sub-osc square | 8 | PIO1 out (`SUBOSC_PIN`) |
+| OSC1 RESET | 19 | PIO0 out |
+| OSC2 RESET | 18 | PIO0 out |
+| OSC3 RESET | 15 | PIO0 out |
+| Sub 1 square | 8 | PIO2 SM0 out (`ENABLE_SUBOSC_ENGINE2`); else PIO1 SM0 (`SUBOSC_PIN`) |
+| Sub 2 square | 9 | PIO2 SM1 out (engine2 only) |
+| Sub 3 square | 10 | PIO2 SM2 out (engine2 only) |
+| Logic combiner | 26 | PIO2 SM3 out (engine2 only) |
 | OSC1 RANGE | 17 | PIO1 SM2 out when `RANGE0_PIO_DITHER_TEST`; else PWM slice |
 | OSC2 RANGE | 16 | PIO1 SM3 out when flag on; else PWM slice |
 | OSC3 RANGE | 14 | PIO0 SM3 out when flag on; else PWM slice |
 
-Live `RANGE_PINS[]` in [`globals.h`](../globals.h) is `{17, 16, 14}`. Same GPIOs in both PWM modes.
+Live `RESET_PINS[]` / `RANGE_PINS[]` in [`globals.h`](../globals.h) are `{19, 18, 15}` /
+`{17, 16, 14}`. Same RANGE GPIOs in both PWM modes. Sub / logic pins and the CV conflict
+when `ENABLE_CV_OUTS` turns on: [`PINOUT.md`](PINOUT.md).
 
 ---
 
@@ -176,14 +196,16 @@ Live `RANGE_PINS[]` in [`globals.h`](../globals.h) is `{17, 16, 14}`. Same GPIOs
 | `frequency_sync_poll_2` | 14 | one of three, PIO0 | 6 | 14 | Soft-sync slave, N=2 (~67%) |
 | `frequency_sync_poll_3` | 15 | one of three, PIO0 | 7 | 15 | Soft-sync slave, N=3 (~86%) |
 | `noise_lfsr` | 12 | **yes**, PIO1 @ origin 0, SM1 | — | — | White LFSR → RX FIFO + optional GP2 bit out |
-| `subosc_div2` | 4 | **yes**, PIO1 | — | — | Divide OSC1 by 2 |
-| `subosc_div4` | 8 | **yes**, PIO1 | — | — | Divide OSC1 by 4 |
+| `subosc_logic` | 8 | **yes** if `ENABLE_SUBOSC_ENGINE2`, PIO2 @ origin 0, SM3 | — | — | Boolean combiner (XOR/AND/…) |
+| `subosc_seg` | 18 | **yes** if engine2, PIO2 @ offset 8, SM0..2 | — | — | Per-osc edge-locked sub (phase + PWM) |
+| `subosc_div2` | 4 | **yes** if *not* engine2, PIO1 | — | — | Classic divide OSC1 by 2 |
+| `subosc_div4` | 8 | **yes** if *not* engine2, PIO1 | — | — | Classic divide OSC1 by 4 |
 | `range_pwm_dither` | 4 | no — `init_range_pio_dither()` after `init_pio()` | — | 1 clk/count | RANGE amp PWM (3-frame dither, wrap 4666) |
 | `frequency` | 18 | no | — | — | Legacy 8-chunk oscillator |
 | `frequency_sync` | 20 | no | — | — | Legacy sync experiment |
 | `frequency_pulse1` | 5 | no | — | — | Legacy PW generator |
 
-`noise_lfsr` must be added **before** the sub-osc programs: it requires instruction
+`noise_lfsr` must be added **before** any other PIO1 programs: it requires instruction
 memory origin 0 (`out pc, 1` XORs via absolute addresses 0/1). SM1 JOIN_RX supplies one
 seed word per `update_noise_gens()`; CPU xorshift-fills a white buffer, then Voss pink /
 leaky brown run from that buffer with no further MMIO. With `ENABLE_NOISE_OUT`, `mov pins, isr`
@@ -601,6 +623,15 @@ EXACT_Y note-on:
 
 ## 9. Sub-oscillator
 
+Two implementations, selected by `ENABLE_SUBOSC_ENGINE2` ([`BUILD_FLAGS.md`](BUILD_FLAGS.md)):
+
+| Build | Where | Features |
+|-------|-------|----------|
+| **Engine2** (RP2350 default) | pio2 SM0..2 + SM3 | Per-osc divide / phase / PWM, per-voice master combine, boolean logic combiner |
+| **Classic** (RP2040, or `#undef` on RP2350) | pio1 SM0 | OSC1 only, fixed 50%, ÷2 / ÷4 |
+
+### 9.1 Classic (`subosc_div2` / `subosc_div4`)
+
 Four instructions on PIO1 turn OSC1's reset pin into a 50% square one or two octaves down. Each
 master cycle presents one rising and one falling edge, so a `wait 1` / `wait 0` pair consumes
 exactly one master cycle.
@@ -614,15 +645,119 @@ exactly one master cycle.
 ```
 
 `subosc_div4` uses four wait pairs per half-cycle for a second sub-octave. Selected by
-`subOscDivide` (0 = off, 2, 4) through `PARAM_SUBOSC_DIVIDE` (id 37).
+`subOscDivide` (0 = off, 2, 4) through `PARAM_SUBOSC_DIVIDE` (id 37). Output on `SUBOSC_PIN` =
+GP8.
 
-> **Trap.** `subosc_init()` points `sm_config_set_in_pins` at `RESET_PINS[0]` but must **not**
-> call `pio_gpio_init` on it. That would move GPIO 29's function select to PIO1 and steal the
-> output away from PIO0 — the same class of bug described in section 3.1. Input sampling reads
-> the pad directly and needs no function select change.
+### 9.2 Engine2 (`subosc_seg` + `subosc_logic`)
 
-Output is on `SUBOSC_PIN` = GP8, freed when the SerialPIO screen UART was removed. **This is
-inaudible until the carrier board gives GP8 a mixer input.**
+One resident copy of `subosc_seg` (22 instructions) serves all three oscillators: **pio2 SM
+index == oscillator index**. Each SM counts flybacks on its own `RESET_PINS[osc]`. Frequency is
+edge-locked — `Cl + Ch` always equals the divide ratio — so phase and pulse width reshape the
+square without ever detuning it.
+
+**Segment stream (3 DMA words per sub period):**
+
+| Word | Contents |
+|------|----------|
+| 0 | `Cl \| (Ch << 16)` — whole master periods per segment (atomic pair; prevents tear) |
+| 1 | `Fl` — fine system-clock cycles before the rising edge |
+| 2 | `Fh` — fine cycles before the falling edge |
+
+CPU work is `subosc2_update_periods()` once per control frame from both voice engines
+(`vt_subosc` probe). Multiplies only; DMA does the pushing. Host sim:
+[`tools/subosc_seg_sim.cpp`](../tools/subosc_seg_sim.cpp).
+
+**Parameters** (also on the `dco_control` Sub-osc tab; no MIDI CCs — map is full):
+
+| ParamId | Role |
+|---------|------|
+| 90–92 | `PARAM_SUB1..3_DIVIDE` — 0 = off, 1 = master rate, 2..8 periods per sub period |
+| 93–95 | `PARAM_SUB1..3_PHASE` — rising-edge delay in degrees of the **master** period (0..359) |
+| 96–98 | `PARAM_SUB1..3_WIDTH` — duty in 1/256ths (128 = 50%) |
+| 99 | `PARAM_SUB_LOGIC_OP` — 0 = off, 1 = XOR … 6 = NOR |
+| 100 | `PARAM_SUB_LOGIC_PAIR` — 0 = subs 1+2, 1 = 1+3, 2 = 2+3 |
+| 102 | `PARAM_SUB_MASTER_OP` — per-voice master combine, 0 = plain sub, 1 = XOR … 6 = NOR (101 was taken) |
+
+`PARAM_SUBOSC_DIVIDE` (37) still exists: under engine2 it sets the same divide on all three
+subs. Mod matrix destinations `MOD_DEST_SUB_PHASE` / `MOD_DEST_SUB_PW` (10/11) offset all
+three at once via `mod_matrix_eval_subosc()` ([`MOD_MATRIX.md`](MOD_MATRIX.md)).
+
+**Pins** (`SUBOSC_PINS[]` / `SUBOSC_LOGIC_PIN` in [`globals.h`](../globals.h)):
+
+| Signal | GPIO | Notes |
+|--------|------|-------|
+| Sub 1 | 8 | Legacy `SUBOSC_PIN` |
+| Sub 2 | 9 | Planned Dist Drive / OSC3 level when CV flags on |
+| Sub 3 | 10 | Was cal sense before GP6 |
+| Combiner out | 26 | Planned Dist Mix / Sub level when CV flags on |
+
+GP8/GP9/GP10 form a consecutive chain so **two** of the three combiner input pairs work
+(subs 1+2 and 2+3). Subs 1+3 (GP8/GP10, gap of 2) cannot — `in pins, 2` needs adjacent
+GPIOs. Default pair is 0 (subs 1+2).
+
+**Boolean combiner (`subosc_logic`):** 8 instructions at pio2 origin 0 on SM3. Reads two
+adjacent sub pads as a 2-bit index into a four-entry jump table; the operator is the table,
+so XOR/AND/OR/XNOR/NAND/NOR is four instruction-memory writes with no SM restart. IN must
+shift left and OUT right (SDK defaults would collapse every combination to entry 0). Host
+sim: [`tools/subosc_logic_sim.cpp`](../tools/subosc_logic_sim.cpp). Debug dump: ParamId 160
+opcode **4** → `subosc2_report()`.
+
+Core-0 divide / logic / master-op changes go through `pio_defer_request_subosc_*` →
+`pio_defer_service()` on core 1. Phase and width are volatile mailboxes.
+
+### 9.3 Per-voice master combine (`PARAM_SUB_MASTER_OP`)
+
+Each sub pad carries `sub OP master`, where master is **that oscillator's own reset pulse**.
+It costs no state machine, no DMA and no pad: `Cl + Ch` equals the divide ratio, so each sub SM
+already consumes exactly one `wait 1` / `wait 0` pair per master period and is therefore already
+standing on both edges of every pulse.
+
+Four `nop`s do the work, one after each wait — after, not on the wait, because a side-set
+applies when its instruction *issues*, which for a wait can be a whole master period early.
+Together with the two segment-edge instructions they carry a four-entry truth table indexed by
+`(sub << 1) | pulse`:
+
+| Site (program-relative) | Entry | Meaning |
+|-------------------------|-------|---------|
+| 1 (`out y, 16`), 7 (`nop`) | 0 | sub low, master released |
+| 5 (`nop`) | 1 | sub low, master asserted |
+| 12 (`mov y, x`), 17 (`nop`) | 2 | sub high, master released |
+| 15 (`nop`) | 3 | sub high, master asserted |
+
+`subosc2_set_master_op()` rewrites those six words (`SUBOSC_SEG_TABLE_SITES` in
+[`pico-dco.pio.h`](../pico-dco.pio.h)) in place, single-word writes, SMs never stop. Masks:
+plain `0xC`, XOR `0x6`, AND `0x8`, OR `0xE`, XNOR `0x9`, NAND `0x7`, NOR `0x1`. Operator 0 is
+the identity table, so it is bit-for-bit the plain sub — the sim asserts exactly that.
+
+Three caveats:
+
+- **Global operator.** All three SMs run one shared instruction image, so the operator applies
+  to all three voices at once. Per-voice choice would need three images (66 instructions).
+- **The master side is a pulse, not a square.** Its width is `pioPulseLength` (3200 cycles), a
+  calibration value. At audio rates that is a fraction of a percent of a master period, so XOR
+  reads as the sub with a narrow notch once per master period and AND as a narrow pulse train
+  gated by the sub. Shape the result with divide / phase / width, not with the pulse length.
+- **Deferred notches.** The program only learns the pulse asserted when a `wait 1` completes, so
+  a pulse that asserts while the SM is inside a fine delay — or inside a segment too short to
+  count a flyback — has its notch deferred until the next wait. The sim counts these separately
+  from errors; worst observed deferral is one pulse width (~0.2 of a master period at the
+  extreme 250 kHz test case), and the wait then completes immediately because the pad is still
+  asserted, so no flyback is lost and the frequency never moves.
+
+Because the boolean combiner on SM3 reads the sub *pads*, turning this on means it combines two
+already-combined signals.
+
+### 9.4 Shared traps
+
+> **Trap.** Sub init points `sm_config_set_in_pins` at a RESET pad but must **not** call
+> `pio_gpio_init` on it. That would steal the RESET function select away from PIO0 — the same
+> class of bug as section 3.1. Input sampling reads the pad directly.
+
+> **Trap.** Combiner inputs must be real pads even if only the combiner output is mixed: a
+> PIO can read a pin another SM drives, but it cannot see another SM's sideset state.
+
+**Audibility:** every sub / combiner pad needs a mixer input on the carrier before it is
+audible.
 
 ---
 
@@ -634,7 +769,7 @@ inaudible until the carrier board gives GP8 a mixer input.**
 |----------|---------|-------------|---------------|
 | `sync_slave_osc()` / `sync_master_osc()` | Resolve `syncMode` into oscillator indices, or -1 | `assign_sm_mapping()`, `start_voice_sms()`, `pio_topology_report()` | none |
 | `assign_sm_mapping()` | Rewrite `VOICE_TO_SM` so the slave sits below its master | `init_pio()`, `setSyncMode()` | Call **before** `start_voice_sms()` |
-| `init_pio()` | Load free + one poll image into PIO0 and both sub-osc programs into PIO1, then start everything | `setup1()` | Boot only |
+| `init_pio()` | Load free + one poll image into PIO0; classic sub into PIO1 *or* `subosc2_init()` on PIO2; noise on PIO1 | `setup1()` | Boot only |
 | `ensure_soft_sync_program(n)` | Swap the resident poll image to N trailing chunks (1..3) | `init_pio()`, `start_voice_sms()` | SMs must be stopped |
 | `start_voice_sms()` | Ensure poll image; choose each SM's program, pins; apply RESET polarity; preload Y; start all three on one cycle | `init_pio()`, `setSyncMode()` | Safe to re-call whenever topology changes |
 | `pio_reset_pin_apply_polarity(pin)` | OUTOVER+INOVER invert/clear for `ENABLE_PIO_RESET_INVERT` | `start_voice_sms()` | RESET pins only |
@@ -645,7 +780,20 @@ inaudible until the carrier board gives GP8 a mixer input.**
 | `pio_topology_report()` | Print sync roles and verify every RESET pin reads back as PIO0 | Bench / diagnostics | Serial up |
 | `pio_period_probe(osc, clk_div)` | Park an oscillator at a fixed divider and print the predicted period | Bench | Disturbs the oscillator |
 | `pio_solve_period_model(...)` | Back-solve weight and overhead from two frequency readings | Bench | Two distinct dividers, same Y |
-| `set_subosc_divide(divide)` | (Re)configure the sub-oscillator; 0 stops it | `init_pio()`, `apply_param_subosc_divide()` | none |
+| `set_subosc_divide(divide)` | Classic: (re)configure pio1 SM0. Engine2: same divide on all three via `subosc2_set_divide` | `init_pio()`, deferred `PARAM_SUBOSC_DIVIDE` | none |
+| `pio_defer_request_subosc_divide(osc, d)` | Engine2: queue per-osc divide for core 1 | `subosc_param_divide()` | `ENABLE_SUBOSC_ENGINE2` |
+| `pio_defer_request_subosc_logic_op/pair` | Engine2: queue combiner op / pair | `subosc_param_logic_*()` | engine2 |
+
+### 10.1b [`subosc.h`](../subosc.h) / [`subosc.ino`](../subosc.ino) (`ENABLE_SUBOSC_ENGINE2`)
+
+| Function | Purpose | Called from |
+|----------|---------|-------------|
+| `subosc2_init()` | Claim pio2 SM0–3, load `subosc_seg` @ 8 + `subosc_logic` @ 0, claim DMA | `init_pio()` |
+| `subosc2_set_divide/phase_deg/width` | Per-osc shape; divide starts/stops SM+DMA | deferred / param / mailboxes |
+| `subosc2_set_logic(op, pair)` | Combiner table rewrite or reconfigure | deferred service |
+| `subosc2_update_periods(...)` | Recompute 3-word segment groups from master periods | both voice engines |
+| `subosc2_report()` | Paced dump (pins, words, DMA, why combiner is off) | debug opcode 4 |
+| `subosc_param_*` | Core-0 entry points (RP2040 stubs ignore phase/width/logic) | `params.ino` |
 
 ### 10.2 [`globals.h`](../globals.h) inlines
 
@@ -675,7 +823,10 @@ and `globals.h` is included first.
 | `osc_last_clk_div[]` | Last divider pushed, so a Y write can restore it (section 6.3) |
 | `softSyncChunks` | 0 = hard sync; 1..3 = soft sync trailing polled chunks |
 | `pio_loaded_sync_chunks` | Which poll image is currently in pio0 instruction memory (1..3) |
-| `subOscDivide` | 0 / 2 / 4 |
+| `subOscDivide` | Classic: 0 / 2 / 4. Engine2: mirrors `subOscDivides[0]` |
+| `subOscDivides[]` / `subOscPhaseDeg[]` / `subOscWidth[]` | Engine2 per-osc state (phase/width volatile) |
+| `subOscLogicOp` / `subOscLogicPair` | Engine2 combiner (default pair 0 = subs 1+2) |
+| `subosc_mod_phase` / `subosc_mod_pw` | Matrix ±1023 units → all three subs |
 
 ---
 
@@ -685,8 +836,10 @@ Everything here is a trap that has already bitten, or would bite the next change
 
 1. **All oscillators stay on PIO0.** Hard sync depends on two SMs sharing one pin's function
    select. Splitting them across blocks silently breaks sync (section 3.1).
-2. **Never `pio_gpio_init` an oscillator pin from another block.** It steals the pin. Reading a
-   pin as input needs no function select change (sections 3.1, 9).
+2. **Never `pio_gpio_init` an oscillator RESET pin from another block.** It steals the pin.
+   Reading a pad as input needs no function select change (sections 3.1, 9).
+2b. **Combiner `in pins, 2` needs adjacent GPIOs.** Three distinct pins can only make two of
+   three pairs adjacent; the third pair stays off and reports why (section 9.2).
 3. **Never write Y to a running state machine.** The OSR is shared with the chunk reads
    (section 6.2).
 4. **Always re-push `clk_div` after writing Y.** `out y, 31` consumes the OSR (section 6.3).
@@ -707,17 +860,17 @@ Everything here is a trap that has already bitten, or would bite the next change
 
 ### 12.0 How to invoke these
 
-Nothing in the firmware calls the three helpers below, so on a running board they are
-reached through `PARAM_DEBUG_COMMAND` (id 160): `1` runs the topology report, `2` and `3`
-run period probes at a low and a high divider. Values **200–50000** (unsigned 16-bit on the
-wire) set `pioPulseLength` instead of running an opcode. See `apply_param_debug_command()` in
-[`params.ino`](../params.ino).
+Nothing in the firmware calls the helpers below, so on a running board they are reached
+through `PARAM_DEBUG_COMMAND` (id 160): `1` runs the topology report, `2` and `3` run period
+probes at a low and a high divider, **`4` dumps the sub-osc engine** (`subosc2_report()`;
+classic builds print a one-line "engine2 not compiled in"). Values **200–50000** (unsigned
+16-bit on the wire) set `pioPulseLength` instead of running an opcode. See
+`apply_param_debug_command()` in [`params.ino`](../params.ino).
 
 The easiest way to send that is the bench controller in
-[`tools/dco_control`](../tools/dco_control/README.md), which has a button for each on its
-Oscillators tab (Sync section) and shows the board's replies in a log pane. It also drives
-`PARAM_SOFT_SYNC` and `PARAM_SUBOSC_DIVIDE`, which have no Input-board UI, so it is the only
-way to exercise soft sync and the sub-oscillator.
+[`tools/dco_control`](../tools/dco_control/README.md): Diagnostics tab for the reports,
+**Sub-osc** tab for per-osc divide/phase/width and the logic combiner. Soft sync and legacy
+`PARAM_SUBOSC_DIVIDE` remain on the Oscillators tab.
 
 ### 12.1 Confirm the sync fix
 
@@ -776,6 +929,6 @@ generated frequency should agree to the displayed precision.
 | **`pioPulseLength` = 3000 vs ~1700** | The RC analysis (section 2.1) calls for ~7.5 us; the constant is 13.3 us. Reducing it would recover ramp amplitude at the top of the range, but the amp-comp tables and `find_gap` calibration were measured with 3000, so it needs a full recalibration pass, not just a constant edit. |
 | **`.pio` source drift** | Duplicate `.program frequency`, two `init_sm_pin` signatures (section 4.1). Worth cleaning so the file could be assembled again as a cross-check on the hand-written header. |
 | **Hard-sync listening check** | The static and runtime checks pass, but the detune-sweep listening test in 12.1 has not been performed on hardware. |
-| **Sub-oscillator** | Firmware complete; GP8 needs a mixer input on the carrier before it is audible. |
+| **Sub-oscillator (engine2)** | Firmware + panel complete on RP2350. Pads GP8/9/10/26 need mixer inputs. Enabling `ENABLE_CV_OUTS` / `ENABLE_VOICE_AUX` double-books GP9/GP26 — renegotiate pins then. Pair 1+3 can never run (adjacency). |
 | **Soft-sync thresholds** | N=1/2/3 implemented via poll-program swap (section 7.4). Listening comparison across thresholds still open. |
 | **Legacy programs** | `frequency`, `frequency_sync`, `frequency_pulse1` are still in the header but never loaded. Removing them would free nothing at runtime, but would reduce confusion. |

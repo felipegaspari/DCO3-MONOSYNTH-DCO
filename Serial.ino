@@ -1,6 +1,52 @@
 // Serial1 = MIDI DIN @ 31250; Serial2 = Input hub @ 2.5M (inner panel protocol).
 // Screen has no DCO port: gap 'x' rides the Input link and Input relays it.
 
+// Input / USB share one LUT. Tag the drain so USB 'p'/'a'/'b'/'d' can mirror to
+// Input without echoing the panel's own stream back onto the Input link.
+enum ParamIngress : uint8_t {
+  PARAM_SRC_INPUT = 0,
+  PARAM_SRC_USB   = 1,
+};
+static ParamIngress g_param_ingress = PARAM_SRC_INPUT;
+
+static void serial_forward_input_block_to_mb(char cmd, const uint8_t* payload, uint8_t len) {
+  if (g_param_ingress != PARAM_SRC_USB) return;
+  if (Serial2.availableForWrite() < 1) return;
+  serial_frame_write(Serial2, (uint8_t)cmd, payload, len);
+}
+
+static void serial_send_adsr_block_to_mb(uint8_t cmd, uint16_t a, uint16_t d, uint16_t s, uint16_t r) {
+  if (Serial2.availableForWrite() < 1) return;
+  uint8_t payload[INPUT_SERIAL_LEN_ADSR_BLOCK];
+  encode_u16_le(payload + 0, a);
+  encode_u16_le(payload + 2, d);
+  encode_u16_le(payload + 4, s);
+  encode_u16_le(payload + 6, r);
+  serial_frame_write(Serial2, cmd, payload, INPUT_SERIAL_LEN_ADSR_BLOCK);
+}
+
+void serial_send_adsr_vca_block_to_mb() {
+  serial_send_adsr_block_to_mb(
+    INPUT_CMD_ADSR1_BLOCK,
+    ADSR_VCA_attack, ADSR_VCA_decay, ADSR_VCA_sustain, ADSR_VCA_release);
+}
+
+void serial_send_adsr_vcf_block_to_mb() {
+  serial_send_adsr_block_to_mb(
+    INPUT_CMD_ADSR2_BLOCK,
+    ADSR_VCF_attack, ADSR_VCF_decay, ADSR_VCF_sustain, ADSR_VCF_release);
+}
+
+void serial_send_filter_block_to_mb() {
+  if (Serial2.availableForWrite() < 1) return;
+  uint8_t payload[INPUT_SERIAL_LEN_FILTER_BLOCK];
+  encode_u16_le(payload + 0, CUTOFF);
+  encode_u16_le(payload + 2, RESONANCE);
+  encode_u16_le(payload + 4, (uint16_t)ADSR2toVCF);
+  encode_u16_le(payload + 6, LFO2toVCF);
+  serial_frame_write(Serial2, INPUT_CMD_FILTER_BLOCK, payload, INPUT_SERIAL_LEN_FILTER_BLOCK);
+}
+
 static void input_handle_adsr1(char, const uint8_t* payload, uint8_t len) {
   if (len != INPUT_SERIAL_LEN_ADSR_BLOCK) return;
 
@@ -20,6 +66,7 @@ static void input_handle_adsr1(char, const uint8_t* payload, uint8_t len) {
   if (v != ADSR_VCA_release) { ADSR_VCA_release = v; dirty |= ADSR_DIRTY_VCA_R; }
 
   if (dirty) mark_adsr_params_dirty(dirty);
+  serial_forward_input_block_to_mb('a', payload, len);
 }
 
 static void input_handle_adsr2(char, const uint8_t* payload, uint8_t len) {
@@ -41,6 +88,7 @@ static void input_handle_adsr2(char, const uint8_t* payload, uint8_t len) {
   if (v != ADSR_VCF_release) { ADSR_VCF_release = v; dirty |= ADSR_DIRTY_VCF_R; }
 
   if (dirty) mark_adsr_params_dirty(dirty);
+  serial_forward_input_block_to_mb('b', payload, len);
 }
 
 // EnvDCO times ('c') → existing ADSR1_* engine (pitch/PW)
@@ -73,15 +121,8 @@ static void input_handle_filter_block(char, const uint8_t* payload, uint8_t len)
   LFO2toVCF  = decode_u16_le(payload + 6);
   cv_bake_adsr2_to_vcf_scale();
   cv_bake_lfo2_to_vcf_scale();
+  serial_forward_input_block_to_mb(INPUT_CMD_FILTER_BLOCK, payload, len);
 }
-
-// USB and panel share one LUT. Tag the drain so USB 'p' can mirror to Input
-// without echoing the panel's own stream (loop).
-enum ParamIngress : uint8_t {
-  PARAM_SRC_INPUT = 0,
-  PARAM_SRC_USB   = 1,
-};
-static ParamIngress g_param_ingress = PARAM_SRC_INPUT;
 
 static bool param_is_persistable(uint8_t id) {
   if (id >= (uint8_t)PARAM_MOD_SLOT0_SOURCE && id <= (uint8_t)PARAM_MOD_SLOT7_DEPTH) {
@@ -90,7 +131,13 @@ static bool param_is_persistable(uint8_t id) {
   if (id >= (uint8_t)PARAM_LFO1_TO_OSC1 && id <= (uint8_t)PARAM_ADSR3_PITCH_MODE) {
     return true;
   }
+  // Sub-oscillator divide / phase / width, three of each, plus the logic combiner (90..100).
+  if (id >= (uint8_t)PARAM_SUB1_DIVIDE && id <= (uint8_t)PARAM_SUB_LOGIC_PAIR) {
+    return true;
+  }
   switch (id) {
+    // Not folded into the range above: 101 sits between them and is a UI mode, not a patch.
+    case PARAM_SUB_MASTER_OP:
     case PARAM_OSC1_SAW_ENABLE:
     case PARAM_OSC1_PULSE_ENABLE:
     case PARAM_OSC1_TRI_ENABLE:

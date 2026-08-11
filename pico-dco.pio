@@ -320,6 +320,144 @@ skip:
     wait 0 pin 0
 .wrap
 
+; Sub-oscillator with programmable phase offset and pulse width (ENABLE_SUBOSC_ENGINE2).
+; One resident copy on pio2 serves all three oscillators: SM index == oscillator index,
+; each with its own IN pin (that oscillator's RESET) and sideset pin (its sub output).
+;
+; A sub period is two segments, low then high. A segment is "Cn whole master flybacks,
+; then Fn fine system-clock cycles", pulled from the FIFO as three words per period:
+;   Cl | Ch<<16, Fl, Fh
+; Counting flybacks is what locks the frequency: Cl + Ch always equals the divide ratio,
+; so phase and width can move the two edges anywhere inside the period without ever
+; detuning the sub. The fine value is an absolute offset from the flyback it follows, so
+; "phase" really is "delay the sub edge N cycles after the master resets".
+;
+; Both counts arrive in one word, split into Y and X up front, because that invariant has
+; to survive the CPU rewriting the stream while the DMA is reading it: a mix of an old Cl
+; and a new Ch would not sum to the divide ratio and the sub would drop or gain a master
+; period. One word cannot be torn. Mixing an old fine value with a new one is harmless -
+; it moves an edge by a few cycles - so those stay separate.
+;
+; Instruction overhead does not accumulate into the period: every segment ends by waiting
+; for a level, so the few cycles spent on pull/mov/jmp are absorbed into that wait. The
+; only requirement is that a fine delay must never run long enough to swallow the flyback
+; the next segment is waiting for (the CPU clamps for that).
+;
+; The test-at-top loop shape (jmp !y before the body) makes a count of zero legal, which
+; is what pulses narrower than one master period need.
+;
+; The output is not the bare sub square but `sub OP master`, where master is that
+; oscillator's reset pulse and OP is a four-entry truth table indexed by
+; (sub << 1) | pulse. Cl + Ch equals the divide ratio, so every master period is consumed
+; by exactly one wait pair here - which means this SM already stands on both edges of
+; every reset pulse and can flip its own output there, with no second state machine, no
+; pin sampling and no extra pad. The nop after each wait is what does the flipping: a
+; side-set on the wait itself would apply when the wait *issues*, up to a whole master
+; period early, so the flip has to be the instruction after.
+;
+; Six side-set values carry the four table entries (T00 and T10 appear twice: once in the
+; loop, once on the segment's own edge instruction, since the pin has to hold the no-pulse
+; level through the fine delay too). subosc2_set_master_op() rewrites those six words in
+; place to change operator. The defaults below are the identity table - output = sub - so
+; an untouched image behaves exactly like the plain sub this grew out of.
+;
+; All three SMs share this one image, so the operator is global across the three voices.
+.program subosc_seg
+.side_set 1 opt
+.wrap_target
+    pull                        ; Cl | Ch<<16: whole master periods per segment
+    out y, 16           side 0  ; Y = Cl, sub low (falling edge of the previous period). T00
+    out x, 16                   ; X = Ch, parked until the high segment
+low_test:
+    jmp !y, low_fine
+    wait 1 pin 0
+    nop                 side 0  ; T01: sub low, master pulse asserted
+    wait 0 pin 0
+    nop                 side 0  ; T00: sub low, master released
+    jmp y-- low_test
+low_fine:
+    pull                        ; Fl: fine cycles before the rising edge
+    mov y, osr
+low_delay:
+    jmp y-- low_delay
+    mov y, x            side 1  ; sub high. T10
+high_test:
+    jmp !y, high_fine
+    wait 1 pin 0
+    nop                 side 1  ; T11: sub high, master pulse asserted
+    wait 0 pin 0
+    nop                 side 1  ; T10: sub high, master released
+    jmp y-- high_test
+high_fine:
+    pull                        ; Fh: fine cycles before the falling edge
+    mov y, osr
+high_delay:
+    jmp y-- high_delay
+.wrap
+
+; Boolean logic combiner for two sub outputs: digital ring modulation, the SID trick.
+;
+; The two sub pins are read as a 2-bit number and used as an index straight into a
+; four-entry jump table, one entry per input combination, each side-setting the output to
+; that combination's result. The operator therefore lives entirely in the table, so
+; switching between XOR / AND / OR / XNOR / NAND / NOR is four instruction-memory writes
+; with no reconfiguration - and every one of those operators is symmetric, so which sub
+; landed on which pin does not matter.
+;
+; `out pc, 2` is an absolute jump, so this program has to be loaded at instruction 0 of the
+; block (hence .origin 0, and subosc_seg is parked above it).
+;
+; Five cycles per sample: at 225 MHz the output follows its inputs within ~22 ns, which is
+; nothing next to an audio-rate edge.
+;
+; Shift directions are not the defaults. IN must shift left so `in pins, 2` leaves the two
+; bits in the *low* end of the ISR, and OUT must shift right so `out pc, 2` reads them from
+; that same end. The default pairing (both right) would hand `out pc` two zero bits and the
+; program would only ever jump to entry 0.
+.program subosc_logic
+.origin 0
+.side_set 1 opt
+    jmp entry           side 0  ; 0: A=0 B=0
+    jmp entry           side 1  ; 1: A=1 B=0   (default table is XOR)
+    jmp entry           side 1  ; 2: A=0 B=1
+    jmp entry           side 0  ; 3: A=1 B=1
+entry:
+    mov isr, null               ; clears the input shift counter as well as the data
+    in pins, 2                  ; IN base = the lower of two *adjacent* sub pins
+    mov osr, isr                ; MOV to OSR marks it full, so no pull is needed
+    out pc, 2
+
+% c-sdk {
+// Boolean combiner. Both inputs are pads this same PIO block already drives from the sub
+// SMs, which is fine - a PIO can always read a pin it owns - but they must be adjacent
+// GPIOs, because an SM has exactly one IN base. outPin has to be a third pad: two SMs in
+// one block driving the same pin fight each other.
+void subosc_logic_init(PIO pio, uint sm, uint inBase, uint outPin) {
+    pio_sm_config c = subosc_logic_program_get_default_config(0);
+    sm_config_set_in_pins(&c, inBase);
+    sm_config_set_in_shift(&c, false, false, 32);   // shift left, no autopush
+    sm_config_set_out_shift(&c, true, false, 32);   // shift right, no autopull
+    sm_config_set_sideset_pins(&c, outPin);
+    pio_sm_set_consecutive_pindirs(pio, sm, outPin, 1, true);
+    pio_gpio_init(pio, outPin);
+    pio_sm_init(pio, sm, 0, &c);
+}
+%}
+
+% c-sdk {
+// Per-oscillator sub. masterPin is that oscillator's RESET pad and is an input only - do
+// NOT pio_gpio_init it, that would move its function select to pio2 and steal the reset
+// output away from pio0.
+void subosc_seg_init(PIO pio, uint sm, uint offset, uint masterPin, uint outPin) {
+    pio_sm_config c = subosc_seg_program_get_default_config(offset);
+    sm_config_set_in_pins(&c, masterPin);
+    sm_config_set_sideset_pins(&c, outPin);
+    pio_sm_set_consecutive_pindirs(pio, sm, outPin, 1, true);
+    pio_gpio_init(pio, outPin);
+    pio_sm_init(pio, sm, offset, &c);
+}
+%}
+
 % c-sdk {
 // Sub-oscillator init. masterPin is an input only - do NOT pio_gpio_init it, that
 // would move its function select to this block and steal the output from pio0.
