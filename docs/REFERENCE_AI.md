@@ -10,7 +10,7 @@ Related docs:
 - Float vs fixed engine math (depth): [`ENGINE_OPTIONS.md`](ENGINE_OPTIONS.md)
 - Hot-path profiling: [`BENCHMARKING.md`](BENCHMARKING.md)
 - SRAM / heap / stack: [`MEMORY.md`](MEMORY.md)
-- Autotune algorithms / refactor layout: [`AUTOTUNE.md`](AUTOTUNE.md), [`AUTOTUNE_REFACTORED.md`](AUTOTUNE_REFACTORED.md)
+- Autotune algorithms: [`../_shared/docs/AUTOTUNE.md`](../_shared/docs/AUTOTUNE.md) (this board: [`AUTOTUNE.md`](AUTOTUNE.md))
 - MCU presets / cal dump-restore: [`PRESET_STORE.md`](PRESET_STORE.md)
 - Repo entry point: [`../README.md`](../README.md)
 
@@ -22,9 +22,9 @@ Related docs:
   - Main application for the RP2040 / RP2350.  
   - Runs on both cores using the Arduino dual-core API:
     - `setup()` / `loop()` (core 0): USB/serial/MIDI I/O, LFO evaluation (~50 µs tick), one-shot `preset_store_boot_task()` after ~1.5 s.
-    - `setup1()` / `loop1()` (core 1): PID & FS init, ADSR init, DCO calibration/autotune, real‑time voice engine.  
+    - `setup1()` / `loop1()` (core 1): FS init, ADSR init, DCO calibration/autotune, real‑time voice engine.  
   - **Engine build options** (top of file: **pitch ids** → **board defaults** → **overrides** → **guards** → profiling / board):
-    - Board defaults (both MCUs): fixed voice/amp/CV (no `USE_FLOAT_*`), `PITCH_INTERP_RATIO_Q16`, amp method `FIXED`, `CLKDIV_MODE CLKDIV_Q16`. No `USE_FLOAT_ENGINE` umbrella.
+    - Board defaults: RP2350 float voice/amp, `PITCH_INTERP_FLOAT_FAST`, amp method `FLOAT_QUAD`, `CLKDIV_FLOAT`; RP2040 fixed voice/amp/CV, `PITCH_INTERP_RATIO_Q16`, amp method `FIXED`, `CLKDIV_Q16`. No `USE_FLOAT_ENGINE` umbrella.
     - Overrides can `#undef` / `#define` those flags (pitch A/B needs `#undef PITCH_INTERP_MODE` first).
     - Full catalog: [`BUILD_FLAGS.md`](BUILD_FLAGS.md). Math depth: [`ENGINE_OPTIONS.md`](ENGINE_OPTIONS.md).
   - Configures USB product strings in `setup()` (via Adafruit TinyUSB; product **DCO3-MONO**), toggles board pins (23/24) for hardware fixes, and selects DCO calibration mode.
@@ -211,18 +211,19 @@ Related docs:
   - Flag / format details: [`ENGINE_OPTIONS.md`](ENGINE_OPTIONS.md) §7.
 
 - **`autotune.h` / `autotune.ino`** (+ helper headers)  
-  - Lives in the shared library: the sketch files are one-line shims onto `_shared/autotune.h`, `_shared/autotune_impl.h` and `_shared/autotune_search_impl.h`. Edit the shared copies; see [`_shared/README.md`](../_shared/README.md) and [`FILE_INDEX.md`](FILE_INDEX.md) §4.
+  - Lives in the shared library: the sketch files are one-line shims onto `_shared/autotune.h`, `_shared/autotune_impl.h` and `_shared/autotune_search_impl.h`. Edit the shared copies; see [`_shared/README.md`](../_shared/README.md), [`FILE_INDEX.md`](FILE_INDEX.md) §4, and [`../_shared/docs/AUTOTUNE.md`](../_shared/docs/AUTOTUNE.md).
   - DCO and PW **autocalibration subsystem**:
     - Flags and state: `calibrationFlag`, `manualCalibrationFlag`, `firstTuneFlag`, `manualCalibrationStage`, offsets per oscillator, PW calibration values, note indices.
     - Calibration arrays (`calibrationData[]`) store [frequency, amplitude] pairs used to rebuild amp‑comp tables.
-  - Included helpers (see [`AUTOTUNE_REFACTORED.md`](AUTOTUNE_REFACTORED.md)):
+  - Included helpers (file roles: [`FILE_INDEX.md`](FILE_INDEX.md) §4):
     - **`autotune_constants.h`** — shared constants / sizes.
     - **`autotune_context.h`** — `DCOCalibrationContext` grouping for `calibrate_DCO`.
     - **`autotune_measurement.h`** — structured `GapMeasurement` wrappers around edge timing.
+  - Boot default amp method is `FREQ_TRACE` (`AUTOTUNE_AMP_METHOD_DEFAULT` = 1); method / search / amp-0 enums live in `_shared/autotune.h`.
   - `DCO_calibration()`:
     - High‑level procedure (called from `loop1()` on `calibrationFlag`):
-      - Calibrates the shared PW once on voice 0 (`find_PW_center()`, `find_PW_limit_v2()` low/high).
-      - For each oscillator, `restart_DCO_calibration()` then `calibrate_DCO()` to populate `calibrationData[]`.
+      - Calibrates PW once per assigned channel via `cal_pw_channel(osc)` (`find_PW_center()`, `find_PW_limit_v2()` low/high). Osc 1/2 are `PW_PIN_UNASSIGNED`, so one cal on channel 0.
+      - For each oscillator, `restart_DCO_calibration()` then `calibrate_DCO()` or `calibrate_DCO_freq_trace()` to populate `calibrationData[]`.
       - Persists data using `update_FS_voice()` and refreshes amp‑comp tables with `init_FS()` and `precompute_amp_comp_for_engine()`.
   - `restart_DCO_calibration()`:
     - Reset the note schedule and `calibrationData` header between oscillators; re‑arms RANGE pin/PIO.

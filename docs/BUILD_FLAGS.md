@@ -5,7 +5,8 @@ Complete inventory of **live compile-time flags** that change codegen, RAM, IO, 
 - **Deep float/fixed math:** [`ENGINE_OPTIONS.md`](ENGINE_OPTIONS.md)
 - **Profiler usage:** [`BENCHMARKING.md`](BENCHMARKING.md)
 - **SRAM / heap / stack:** [`MEMORY.md`](MEMORY.md) (`__not_in_flash_func`, dump cmd 13, pin policy)
-- **Live source of truth for engine/IO toggles:** top of [`../DCO.ino`](../DCO.ino) before includes
+- **Autotune algorithms:** [`../_shared/docs/AUTOTUNE.md`](../_shared/docs/AUTOTUNE.md)
+- **Live source of truth for engine/IO/cal toggles:** top of [`../DCO.ino`](../DCO.ino) before includes
 
 **Override order:** flags set in `DCO.ino` before `#include` win. Header `#ifndef` / library fallbacks apply only when the sketch left them unset.
 
@@ -13,25 +14,27 @@ Complete inventory of **live compile-time flags** that change codegen, RAM, IO, 
 
 ---
 
-## Shipping snapshot (both MCUs)
+## Shipping snapshot
 
-Unless overridden, RP2350 and RP2040 ship the same engine shape:
+Board defaults in `DCO.ino` differ by MCU (`PICO_RP2350` vs else). The overrides block after that can force either shape.
 
-| Area | Shipping |
-|------|----------|
-| Voice / amp / CV | Fixed (`USE_FLOAT_*` undefined) |
-| Pitch | `PITCH_INTERP_RATIO_Q16` |
-| Amp method default | `2` (`FIXED`) |
-| Clkdiv | `CLKDIV_MODE CLKDIV_Q16` |
-| Noise | `NOISE_ENGINE 1`, `ENABLE_NOISE_OUT` off |
-| ADSR | fixed Q22 phase, micros, native Q15 |
-| USB panel | `ENABLE_USB_CONTROL` on |
-| CV / mux / aux HW | off (`ENABLE_CV_OUTS` / `WAVE_MUX` / `VOICE_AUX` commented) |
-| Sub-osc engine2 | **on RP2350** (two subs + combiner), unavailable RP2040 (`ENABLE_SUBOSC_ENGINE2`) |
-| PIO RESET | `ENABLE_PIO_RESET_INVERT` on |
-| RANGE amp PWM | `RANGE0_PIO_DITHER_TEST` on (PIO dither; comment out = slice PWM) |
-| Profiler (tree as checked in) | `RUNNING_AVERAGE` + `RUNNING_AVERAGE_PERIOD` on; FINE off |
-| Mem diag (dump 13) | `ENABLE_MEM_DIAG` on; runtime polls on |
+| Area | RP2350 | RP2040 |
+|------|--------|--------|
+| Voice / amp | `USE_FLOAT_VOICE_TASK` + `USE_FLOAT_AMP_COMP` | Fixed (`USE_FLOAT_*` undefined) |
+| Pitch | `PITCH_INTERP_FLOAT_FAST` | `PITCH_INTERP_RATIO_Q16` |
+| Amp method default | `0` (`FLOAT_QUAD`) | `2` (`FIXED`) |
+| Clkdiv | `CLKDIV_FLOAT` | `CLKDIV_Q16` |
+| CV outs | Fixed (`USE_FLOAT_CV_OUTS` off) | same |
+| Noise | `NOISE_ENGINE 1`, `ENABLE_NOISE_OUT` off | same |
+| Autotune | FREQ_TRACE / INTERP / CALC (`AUTOTUNE_*_DEFAULT` = 1) | same |
+| ADSR | fixed Q22 phase, micros, native Q15 | same |
+| USB panel | `ENABLE_USB_CONTROL` on | same |
+| CV / mux / aux HW | off (`ENABLE_CV_OUTS` / `WAVE_MUX` / `VOICE_AUX` commented) | same |
+| Sub-osc engine2 | **on** (two subs + combiner) | unavailable (`#error` if forced) |
+| PIO RESET | `ENABLE_PIO_RESET_INVERT` on | same |
+| RANGE amp PWM | `RANGE0_PIO_DITHER_TEST` on (PIO dither; comment out = slice PWM) | same |
+| Profiler (tree as checked in) | `RUNNING_AVERAGE` + `RUNNING_AVERAGE_PERIOD` on; FINE off; `BENCH_STAGE_STRIDE` 1; `BENCH_PERIOD_MAX_US` 20000 | same |
+| Mem diag (dump 13) | `ENABLE_MEM_DIAG` on; runtime polls on | same |
 
 Confirm with the `engine:` / `io:` lines in the profiler banner ([`bench.h`](../bench.h)).
 
@@ -50,27 +53,27 @@ Confirm with the `engine:` / `io:` lines in the profiler banner ([`bench.h`](../
 
 ### 1.2 Engine — board defaults (`PICO_RP2350` / else)
 
-Both branches currently set the same values via `#ifndef`:
+| Define | RP2350 | RP2040 | Effect | Consumed |
+|--------|--------|--------|--------|----------|
+| `USE_FLOAT_VOICE_TASK` | **on** | off | Compile `voice_task_float` instead of fixed | [`voices.h`](../voices.h) / [`voices.ino`](../voices.ino) |
+| `USE_FLOAT_AMP_COMP` | **on** | off | Float amp tables + LUT (~42 KB) dual-build | [`amp_comp.h`](../amp_comp.h), [`FS.ino`](../FS.ino) |
+| `AMP_COMP_METHOD_DEFAULT` | `0` (FLOAT_QUAD) | `2` (FIXED) | Initial `amp_comp_method` | [`amp_comp.h`](../amp_comp.h), runtime cmds 20–22 |
+| `PITCH_INTERP_MODE` | `PITCH_INTERP_FLOAT_FAST` | `PITCH_INTERP_RATIO_Q16` | Selects one interpolator + its tables | [`voices.ino`](../voices.ino), pitch benches |
+| `CLKDIV_MODE` | `CLKDIV_FLOAT` (`1`) | `CLKDIV_Q16` (`2`) | Clkdiv (accuracy order): `0` GOLD (double `llround`); `1` FLOAT (Q24 → float Hz / native Hz on float voice); `2` Q16; `3` Q8 (Q8 32/32+corr); `4` FAST_Q4 (Q4 32/32). Value `0` is GOLD, not old HP0. Value `1` is FLOAT, not old PRECISE_Q8. Both voice engines: fixed via `clkdiv_live_total_cycles`, float via `clkdiv_live_hz_total_cycles`. Cmds 32–33 A/B all five live + GOLD_REF. | `voice_task_fixed_point` / `voice_task_float`, [`clkdiv.h`](../clkdiv.h), [`clkdiv_bench.ino`](../clkdiv_bench.ino) |
 
-| Define | Shipping | Effect | Consumed |
-|--------|----------|--------|----------|
-| `AMP_COMP_METHOD_DEFAULT` | `2` (FIXED) | Initial `amp_comp_method` | [`amp_comp.h`](../amp_comp.h), runtime cmds 20–22 |
-| `PITCH_INTERP_MODE` | `PITCH_INTERP_RATIO_Q16` | Selects one interpolator + its tables | [`voices.ino`](../voices.ino), pitch benches |
-| `CLKDIV_MODE` | `CLKDIV_Q16` (`2`) | Clkdiv (accuracy order): `0` GOLD (double `llround`); `1` FLOAT (Q24 → float Hz / native Hz on float voice); `2` Q16 (shipping); `3` Q8 (Q8 32/32+corr); `4` FAST_Q4 (Q4 32/32). Value `0` is GOLD, not old HP0. Value `1` is FLOAT, not old PRECISE_Q8. Both voice engines: fixed via `clkdiv_live_total_cycles`, float via `clkdiv_live_hz_total_cycles`. Cmds 32–33 A/B all five live + GOLD_REF. | `voice_task_fixed_point` / `voice_task_float`, [`clkdiv.h`](../clkdiv.h), [`clkdiv_bench.ino`](../clkdiv_bench.ino) |
-
-Float voice / amp / CV are **not** defined by board defaults (enable only in overrides).
+`USE_FLOAT_CV_OUTS` is **not** a board default (enable only in overrides). Math detail: [`ENGINE_OPTIONS.md`](ENGINE_OPTIONS.md).
 
 ### 1.3 Engine — overrides (commented A/B)
 
-| Define | Shipping | Effect | Consumed |
-|--------|----------|--------|----------|
-| `USE_FLOAT_VOICE_TASK` | off | Compile `voice_task_float` instead of fixed | [`voices.h`](../voices.h) / [`voices.ino`](../voices.ino) |
-| `USE_FLOAT_AMP_COMP` | off | Float amp tables + LUT (~42 KB) dual-build | [`amp_comp.h`](../amp_comp.h), [`FS.ino`](../FS.ino) |
-| `USE_FLOAT_CV_OUTS` | off | Float VCA/VCF/keytrack/drift path | [`cv_out.ino`](../cv_out.ino), [`cv_state.h`](../cv_state.h) |
+The overrides block is commented in the tree. RP2350 already enables float voice/amp via §1.2; uncomment here to force a path on RP2040 or to A/B clkdiv / pitch / amp method.
+
+| Define | Overrides block | Effect | Consumed |
+|--------|-----------------|--------|----------|
+| `USE_FLOAT_VOICE_TASK` | commented | Compile `voice_task_float` instead of fixed | [`voices.h`](../voices.h) / [`voices.ino`](../voices.ino) |
+| `USE_FLOAT_AMP_COMP` | commented | Float amp tables + LUT (~42 KB) dual-build | [`amp_comp.h`](../amp_comp.h), [`FS.ino`](../FS.ino) |
+| `USE_FLOAT_CV_OUTS` | commented | Float VCA/VCF/keytrack/drift path | [`cv_out.ino`](../cv_out.ino), [`cv_state.h`](../cv_state.h) |
 
 Pitch A/B: `#undef PITCH_INTERP_MODE` then redefine. Guard: `FLOAT` / `FLOAT_FAST` without float voice → `#error`.
-
-Math detail: [`ENGINE_OPTIONS.md`](ENGINE_OPTIONS.md).
 
 ### 1.4 Noise
 
@@ -88,16 +91,26 @@ Math detail: [`ENGINE_OPTIONS.md`](ENGINE_OPTIONS.md).
 | `RUNNING_AVERAGE` | **on** | Hot-path profiler (`bench.h`); paced `bench_out_*` | [`bench.h`](../bench.h), benches |
 | `RUNNING_AVERAGE_FINE` | off | Extra tiny-stage probes (opt barrier) | `BENCH_FBEGIN` / `FEND` |
 | `RUNNING_AVERAGE_PERIOD` | **on** | Period probes only; stage probes compile out; overrides FINE | `bench.h` |
-| `BENCH_STAGE_STRIDE` | `9` | MAIN/FINE stage probes every Nth loop (`1` = every iter); note-on always; needs `RUNNING_AVERAGE` | [`bench.h`](../bench.h), [`DCO.ino`](../DCO.ino) |
+| `BENCH_STAGE_STRIDE` | `1` | MAIN/FINE stage probes every Nth loop (`1` = every iter); note-on always; needs `RUNNING_AVERAGE` | [`bench.h`](../bench.h), [`DCO.ino`](../DCO.ino) |
 | `BENCH_USE_SYSTICK` | `1` | SysTick for PERIOD + stages; `0` → 1 µs timer for all probes. Dump window still 1 µs. | [`bench.h`](../bench.h), [`DCO.ino`](../DCO.ino) |
-| `BENCH_PERIOD_MAX_US` | `2000` | Discard PERIOD samples longer than this (autotune / wrap-looking stalls) | [`bench.h`](../bench.h), [`DCO.ino`](../DCO.ino) |
+| `BENCH_PERIOD_MAX_US` | `20000` | Discard PERIOD samples longer than this (autotune / wrap-looking stalls) | [`bench.h`](../bench.h), [`DCO.ino`](../DCO.ino) |
 | `BENCH_PATH_STATS` | off | All path bumps + `-- Path counters --` dump; needs `RUNNING_AVERAGE`; no-op under PERIOD | [`bench.h`](../bench.h), [`voices.ino`](../voices.ino) |
 | `AMP_COMP_BENCHMARK` | off | Amp speed/accuracy cmds 24–25; needs `RUNNING_AVERAGE` + `USE_FLOAT_AMP_COMP` | [`amp_comp_bench.ino`](../amp_comp_bench.ino) |
 | `ENABLE_MEM_DIAG` | **on** | Cmd 13 RAM dump + `loop`/`loop1` polls; comment out = empty inlines. Runtime 14/15 disable/enable polls | [`mem_diag.h`](../mem_diag.h), [`MEMORY.md`](MEMORY.md) |
 
 Pitch interp cmds **28–29** and fixed clkdiv cmds **32–33** (`CLKDIV_MODE` A/B) need `RUNNING_AVERAGE` only (no extra flag): [`pitch_interp_bench.ino`](../pitch_interp_bench.ino), [`clkdiv_bench.ino`](../clkdiv_bench.ino).
 
-### 1.6 Board / IO
+### 1.6 Calibration (auto-cal boot defaults)
+
+Set in `DCO.ino` before includes. Enums and `#ifndef` fallbacks live in [`_shared/autotune.h`](../_shared/autotune.h). Algorithms: [`../_shared/docs/AUTOTUNE.md`](../_shared/docs/AUTOTUNE.md).
+
+| Define | Shipping | Effect | Consumed |
+|--------|----------|--------|----------|
+| `AUTOTUNE_AMP_METHOD_DEFAULT` | `1` (FREQ_TRACE) | Amp-comp calibration search: `0` CLASSIC (per-note range-PWM search), `1` FREQ_TRACE (fixed-PWM frequency bisection from the manual 440 Hz anchor). Runtime 34/35 (panel Calibration tab); reported as `amp_cal=` on the profiler `engine:` line. Header fallback is `0` if this is unset. | [`DCO.ino`](../DCO.ino), [`_shared/autotune.h`](../_shared/autotune.h) |
+| `AUTOTUNE_SEARCH_MODE_DEFAULT` | `1` (INTERP) | How the frequency search closes in once it has a bracket: `0` BISECT, `1` INTERP, `2` GATED. Runtime 37/38/39. Header fallback is also `1`. | [`DCO.ino`](../DCO.ino), [`_shared/autotune.h`](../_shared/autotune.h) |
+| `AUTOTUNE_AMP0_MODE_DEFAULT` | `1` (CALC) | Amp-comp-0 endpoint (pair 0): `0` MEASURE (live hunt), `1` CALC (bottom-rung fit). Runtime 40/41. Header fallback is `0` if this is unset. | [`DCO.ino`](../DCO.ino), [`_shared/autotune.h`](../_shared/autotune.h) |
+
+### 1.7 Board / IO
 
 | Define | Shipping | Effect | Consumed |
 |--------|----------|--------|----------|
@@ -108,11 +121,8 @@ Pitch interp cmds **28–29** and fixed clkdiv cmds **32–33** (`CLKDIV_MODE` A
 | `ENABLE_VOICE_AUX` | off | Skip local Dist/filter writers (aux owns them) | [`PWM.ino`](../PWM.ino), globals |
 | `ENABLE_PIO_RESET_INVERT` | **on** | Active-low RESET pad via GPIO OVER | [`state_machines.ino`](../state_machines.ino) |
 | `ENABLE_SUBOSC_ENGINE2` | **on RP2350**; off / `#error` on RP2040 | Two subs on pio2 SM0/SM1 (`subosc_seg` + DMA, per-sub master select) + boolean combiner on SM3 whose output is what gets mixed; `#undef` to A/B classic pio1 sub | [`subosc.h`](../subosc.h) / [`subosc.ino`](../subosc.ino), [`PIO_OSCILLATORS.md`](PIO_OSCILLATORS.md) §9, [`PINOUT.md`](PINOUT.md) |
-| `RANGE0_PIO_DITHER_TEST` | **on** | All `RANGE_PINS[]` via PIO dither PWM; comment out = HW slice `wrap=DIV_COUNTER` | [`PWM.h`](../PWM.h) / [`PWM.ino`](../PWM.ino), [`autotune.ino`](../autotune.ino), `setup1()` |
+| `RANGE0_PIO_DITHER_TEST` | **on** | All `RANGE_PINS[]` via PIO dither PWM; comment out = HW slice `wrap=DIV_COUNTER` | [`PWM.h`](../PWM.h) / [`PWM.ino`](../PWM.ino), [`_shared/autotune_impl.h`](../_shared/autotune_impl.h), `setup1()` |
 | `NOTE_RETRIG_MODE_DEFAULT` | `0` (EXACT_Y) | Note-on sync retrig default; runtime 26/27 | [`globals.h`](../globals.h) |
-| `AUTOTUNE_AMP_METHOD_DEFAULT` | `1` (FREQ_TRACE) | Amp-comp calibration search used by auto-cal: `0` CLASSIC (per-note range-PWM search), `1` FREQ_TRACE (fixed-PWM frequency bisection from the manual 440 Hz anchor). Runtime 34/35 (panel Calibration tab); reported as `amp_cal=` on the profiler `engine:` line. Fallback in `globals.h` is `0` if this is unset. | [`DCO.ino`](../DCO.ino), [`globals.h`](../globals.h), [`AUTOTUNE.md`](AUTOTUNE.md) |
-| `AUTOTUNE_SEARCH_MODE_DEFAULT` | `1` (INTERP) | How the frequency search closes in once it has a bracket: `0` BISECT, `1` INTERP, `2` GATED. Runtime 37/38/39. Fallback in `globals.h` is also `1`. | [`DCO.ino`](../DCO.ino), [`globals.h`](../globals.h) |
-| `AUTOTUNE_AMP0_MODE_DEFAULT` | `1` (CALC) | Amp-comp-0 endpoint (pair 0): `0` MEASURE (live hunt), `1` CALC (bottom-rung fit). Runtime 40/41. Fallback in `_shared/autotune.h` is `0` if this is unset. | [`DCO.ino`](../DCO.ino), [`_shared/autotune.h`](../_shared/autotune.h) |
 
 ---
 
@@ -182,6 +192,7 @@ block (classic sub occupies pio1 SM0). See [`PINOUT.md`](PINOUT.md) / [`PIO_OSCI
 | `NUM_VOICES_TOTAL` | 3 | Voice-slot capacity (MIDI / ADSR / flags) |
 | `NUM_VOICES_VOICE_TASK` | 1 | Legacy mono bind |
 | `NUM_OSCILLATORS` | 3 | Physical DCOs |
+| `NUM_PW_CHANNELS` | unset | `_shared/autotune.h` defaults it to `NUM_OSCILLATORS`; osc 1/2 are `PW_PIN_UNASSIGNED` |
 | `NUM_FILTERS` | 2 (`#ifndef`) | Filter count (also defaulted in `cv_out.h` / `PWM.h` / `cv_state.h`) |
 | `MIDI_CHANNEL` | 1 | Default MIDI channel |
 
@@ -194,6 +205,8 @@ block (classic sub occupies pio1 SM0). See [`PINOUT.md`](PINOUT.md) / [`PIO_OSCI
 | [`noise.h`](../noise.h) | `NOISE_ENGINE` | fallback `0` if sketch omit | DCO sets `1` in `DCO.ino` |
 | [`bench.h`](../bench.h) | `BENCH_USE_SYSTICK` / `BENCH_PERIOD_MAX_US` | sketch wins | Header `#ifndef` fallbacks only if unset in [`DCO.ino`](../DCO.ino) |
 | [`amp_comp.h`](../amp_comp.h) | `AMP_COMP_METHOD_DEFAULT` | fallback `AMP_COMP_FIXED` | Only if unset before include |
+| [`_shared/autotune.h`](../_shared/autotune.h) | `AUTOTUNE_AMP_METHOD_DEFAULT` / `SEARCH` / `AMP0` | sketch wins (`1`/`1`/`1`); header fallback `0`/`1`/`0` | Only if unset before include |
+| [`_shared/autotune.h`](../_shared/autotune.h) | `NUM_PW_CHANNELS` | defaults to `NUM_OSCILLATORS` | DCO3 leaves it unset |
 | [`voices.ino`](../voices.ino) | `DCO_DEBUG_REPORT` | `0` | `1` = serial dump of OSC1 frequency stages |
 
 Headers that only **consume** flags (no new feature `#define`): `voices.h`, `cv_state.h`, `cv_out.h`, `PWM.h`, `Serial.h`, `FS.h`, `mod_matrix.h`, `include_all.h`, etc.
@@ -215,6 +228,7 @@ Headers that only **consume** flags (no new feature `#define`): `voices.h`, `cv_
 | Goal | Where |
 |------|--------|
 | Float/fixed voice, pitch, amp, CV, HP clkdiv | `DCO.ino` **ENGINE — overrides** (and board defaults for MCU policy) |
+| Autotune method / search / amp-0 boot defaults | `DCO.ino` **CALIBRATION** block (`AUTOTUNE_*_DEFAULT`) |
 | Noise engine / PIO white pin | `DCO.ino` noise block |
 | Profiler on/off / period-only | `DCO.ino` profiling block |
 | USB panel / CV HW / aux / RESET invert | `DCO.ino` BOARD / IO |

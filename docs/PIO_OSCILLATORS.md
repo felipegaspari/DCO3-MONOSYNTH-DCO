@@ -9,7 +9,7 @@ topology, the period arithmetic, the two sync flavours, phase align, and the sub
 **Live source of truth for the timing constants:** the "PIO Program Timing Constants" block in
 [`globals.h`](../globals.h).
 
-Related: [`PINOUT.md`](PINOUT.md) (pin and block map), [`AUTOTUNE.md`](AUTOTUNE.md) (how the
+Related: [`PINOUT.md`](PINOUT.md) (pin and block map), [`../_shared/docs/AUTOTUNE.md`](../_shared/docs/AUTOTUNE.md) (how the
 reset pulse interacts with gap measurement and amp-comp), [`ENGINE_OPTIONS.md`](ENGINE_OPTIONS.md)
 (which voice engine computes the dividers).
 

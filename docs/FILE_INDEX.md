@@ -149,7 +149,7 @@ Umbrella include (`mem_diag.h`, `preset_store.h`, …). **No function definition
 
 ### `globals.h`
 
-Shared constants, pins, state, prototypes. Includes Character knobs / `char_*_scale_q15` (see [`CHARACTER.md`](CHARACTER.md)), and the two build-flag-seeded runtime selectors `note_retrig_mode` (`NOTE_RETRIG_MODE_DEFAULT`, cmds 26/27) and `autotuneAmpMethod` (`AUTOTUNE_AMP_METHOD_DEFAULT`, cmds 34/35) — both here rather than with their subsystems so [`bench.h`](../bench.h) can print them. **No function definitions** (inlines for period split live here).
+Shared constants, pins, state, prototypes. Includes Character knobs / `char_*_scale_q15` (see [`CHARACTER.md`](CHARACTER.md)), and `note_retrig_mode` (`NOTE_RETRIG_MODE_DEFAULT`, cmds 26/27). Amp-cal method / search / amp-0 live in [`_shared/autotune.h`](../_shared/autotune.h). **No function definitions** (inlines for period split live here).
 
 ### `character_jitter.h`
 
@@ -603,7 +603,7 @@ Live LFO instances + Q15 levels + pitch mod arrays. Pitch/drift depth scales (`L
 ## 4. Calibration / storage / experimental
 
 > The whole calibration subsystem lives in the shared library
-> (`DCO-SHARED-LIBRARIES/`, reached as `_shared/`), so DCO4 can adopt it. The
+> (`DCO-SHARED-LIBRARIES/`, reached as `_shared/`), and both sketches consume it. The
 > sketch keeps three one-line shims: `autotune.h` → `_shared/autotune.h`,
 > `autotune.ino` → `_shared/autotune_impl.h`, `autotune_search.ino` →
 > `_shared/autotune_search_impl.h`. The file names below are the shared ones;
@@ -644,7 +644,7 @@ Included once from the `autotune.ino` shim. Statics used before their definition
 - `reset_pw_to_DIV_COUNTER_PW()` — Shared PW PWM → max wrap.
   - **Called from:** `disable_all_oscillators_and_range_pwm()`.
   - **When:** Cal setup.
-- `DCO_calibration()` — Auto-cal; `calibrationScope` (param 150 value: 1 amp, 2 PW, 3 full; 5/6/7 = the same at `CAL_PRECISION_FINE`) selects the stages: PW center/limits once on voice 0, and/or per osc 0..2 the amp-comp stage (fine → `refine_DCO_amp_table`, otherwise `calibrate_DCO` or `calibrate_DCO_freq_trace` per `autotuneAmpMethod`, debug cmds 34/35) + `apply_measured_lowest_freq()` for the classic normal run's amp-comp-0 anchor + raw table dump + `print_calibration_report()` + FS write (skipped when a `FREQ_TRACE` table fails its monotonicity check), reload, precompute; clears `calibrationFlag`. An amp-only run applies the stored `PW_CENTER[0]` without searching. Cancelable: clears `calibrationCancelRequested` on entry; every search loop polls it (param 150 = 0 sets it from core 0) and the interrupted stage keeps its previous values.
+- `DCO_calibration()` — Auto-cal; `calibrationScope` (param 150 value: 1 amp, 2 PW, 3 full; 5/6/7 = the same at `CAL_PRECISION_FINE`; 9/10/11 FAST) selects the stages: PW center/limits once per assigned channel (`cal_pw_channel`), and/or per osc 0..2 the amp-comp stage (fine → `refine_DCO_amp_table`, otherwise `calibrate_DCO` or `calibrate_DCO_freq_trace` per `autotuneAmpMethod`, debug cmds 34/35) + `apply_measured_lowest_freq()` for the classic normal run's amp-comp-0 anchor + raw table dump + `print_calibration_report()` + FS write (skipped when a `FREQ_TRACE` table fails its monotonicity check), reload, precompute; clears `calibrationFlag`. An amp-only run applies the stored `PW_CENTER[ch]` without searching. Cancelable: clears `calibrationCancelRequested` on entry; every search loop polls it (param 150 = 0 sets it from core 0) and the interrupted stage keeps its previous values.
   - **Called from:** `loop1()` when `calibrationFlag && !manualCalibrationFlag`.
   - **When:** Auto-cal (blocking one-shot).
 - `restart_DCO_calibration()` — Reset state/table header between oscillators; also clears `g_lastDrivenFreqHz` so the next oscillator's first probe is treated as a cold start rather than a move from the previous one's frequency.
@@ -697,7 +697,7 @@ Included once from the `autotune.ino` shim. Statics used before their definition
   - **When:** On request, outside calibration.
 - `cal_sense_probe_log()` — 40 ms raw cal-sense edge probe (no period gate); `[CAL_SENSE] pin=…` ~2 Hz.
   - **Called from:** `DCO_calibration_debug()` on gap timeout.
-  - **When:** Manual-cal timeout diagnostics. Bench table: [`AUTOTUNE.md`](AUTOTUNE.md) “Cal-sense bench checks” (`DCO_calibration_pin`, currently GP6).
+  - **When:** Manual-cal timeout diagnostics. Bench table: [`../_shared/docs/AUTOTUNE.md`](../_shared/docs/AUTOTUNE.md) “Cal-sense bench checks” (`DCO_calibration_pin`, currently GP6).
 - `DCO_calibration_debug()` — Live gap → `[MANUAL_GAP]` + `serialSendParam32` for UI; probe on TIMEOUT.
   - **Called from:** `loop1()` manual-cal branch every iter.
   - **When:** Manual-cal.
@@ -1219,9 +1219,10 @@ All detailed docs live under `docs/` (this file included). Root `README.md` is t
 | `docs/README_serial_and_params.md` | Slim inner serial / ParamId how-to, including MIDI CC, RAW vs COBS, preset cmds. |
 | `docs/MIDI_CC_MAP.md` | **Generated** — MIDI CC implementation chart. |
 | `docs/Serial_comms_and_params_reference.txt` | **Archive** — Mainboard-era protocol notes. |
-| `docs/AUTOTUNE.md` | Autotune algorithms. |
-| `docs/AUTOTUNE_REFACTORED.md` | Autotune refactor structure. |
-| `docs/CALIBRATION_PROCEDURE.md` | Full calibration workflow: manual trim at 440 Hz, auto-cal methods, backup/verify. |
+| `docs/AUTOTUNE.md` | Stub — this board’s osc/PW/pin facts; algorithms in `_shared/docs/AUTOTUNE.md`. |
+| `docs/CALIBRATION_PROCEDURE.md` | Stub — operator workflow in `_shared/docs/CALIBRATION_PROCEDURE.md`. |
+| `_shared/docs/AUTOTUNE.md` | Shared autotune algorithms. |
+| `_shared/docs/CALIBRATION_PROCEDURE.md` | Shared calibration bring-up. |
 
 ---
 

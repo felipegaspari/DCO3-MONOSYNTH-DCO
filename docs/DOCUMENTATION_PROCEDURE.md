@@ -86,7 +86,7 @@ Adapt; do **not** copy DCO docs blindly.
 |-------------|------------------------|
 | `ENGINE_OPTIONS.md` (or equivalent) | Only if the board has meaningful compile-time math/feature forks. Mark older migration notes **Archive** with a pointer to the live doc. |
 | Protocol / domain how-to | Refresh existing (e.g. serial/params) or add board equivalents (UI screens, ADC map, modulation CV paths). |
-| Domain algorithm docs | Only if a non-obvious subsystem needs long-form docs (like DCO `AUTOTUNE*.md`). |
+| Domain algorithm docs | Only if a non-obvious subsystem needs long-form docs (like shared `_shared/docs/AUTOTUNE.md`). |
 
 Accuracy rules: no phantom files; note cross-repo-only headers; archive banners → live doc.
 
@@ -168,7 +168,7 @@ Steps:
 | 0 | Cross-repo audit; gaps prioritized (system overview, engine flags, file index, comment coverage) |
 | 1 | [`SYSTEM_OVERVIEW.md`](SYSTEM_OVERVIEW.md) — four boards, UART topology, ownership |
 | 2 | Root [`../README.md`](../README.md) — features, pins, dual engine, doc index |
-| 3 | [`ENGINE_OPTIONS.md`](ENGINE_OPTIONS.md); refreshed [`AUTOTUNE.md`](AUTOTUNE.md), [`AUTOTUNE_REFACTORED.md`](AUTOTUNE_REFACTORED.md), [`README_serial_and_params.md`](README_serial_and_params.md) |
+| 3 | [`ENGINE_OPTIONS.md`](ENGINE_OPTIONS.md); shared [`../_shared/docs/AUTOTUNE.md`](../_shared/docs/AUTOTUNE.md); [`README_serial_and_params.md`](README_serial_and_params.md) |
 | 4 | [`REFERENCE_AI.md`](REFERENCE_AI.md) — semantic map aligned to current code |
 | 5 | [`FILE_INDEX.md`](FILE_INDEX.md) — files, functions, Called from / When |
 | 6 | `//` comments on previously bare functions across `.ino` sources |

@@ -87,6 +87,6 @@ See `docs/` — especially:
 - [`tools/dco_control/`](tools/dco_control/README.md) — Linux bench controller: parameters, preset browser, MCU sync, cal backup over USB
 - [`docs/MIDI_CC_MAP.md`](docs/MIDI_CC_MAP.md) — MIDI CC implementation chart: the same control surface over 7-bit CC, for a panel app or a DAW (generated, along with the Open Stage Control session in `tools/panels/`)
 - [`docs/MAINBOARD_ABSORPTION.md`](docs/MAINBOARD_ABSORPTION.md) — plan to absorb Mainboard into DCO
-- `AUTOTUNE.md`, `SYSTEM_OVERVIEW.md`, `FILE_INDEX.md` (some docs may still mention DCO4; prefer this README for monosynth facts)
+- [`docs/AUTOTUNE.md`](docs/AUTOTUNE.md) — this board’s cal facts; algorithms in [`_shared/docs/AUTOTUNE.md`](_shared/docs/AUTOTUNE.md). [`docs/SYSTEM_OVERVIEW.md`](docs/SYSTEM_OVERVIEW.md), [`docs/FILE_INDEX.md`](docs/FILE_INDEX.md)
 
 Removed dead code lives under `_removed/` and is not compiled.
