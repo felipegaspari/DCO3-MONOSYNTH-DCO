@@ -1,41 +1,17 @@
-// Mono last-note-priority held stack (Core0 MIDI path only).
-// Top = sounding pitch. Voice_task porta still restarts only on note_on_flag →
+// Mono held-key stack lives in the shared library (monoStack in
+// voice_alloc_state.h); which entry sounds depends on the allocation mode,
+// which doubles as the mono note priority.
+// Voice_task porta still restarts only on note_on_flag →
 // note_on_flag_flag from VOICE_NOTES (no pitch queue on Core1).
-static constexpr uint8_t MONO_NOTE_STACK_DEPTH = 8;
-static uint8_t mono_note_stack[MONO_NOTE_STACK_DEPTH];
-static uint8_t mono_note_stack_count = 0;
+static constexpr uint8_t MONO_NOTE_NONE = VOICE_ALLOC_NONE;
+// Pitch currently gated on voice 0, so a key that loses priority can be stacked
+// silently instead of retriggering the envelope.
+static uint8_t mono_sounding_note = MONO_NOTE_NONE;
 
 // Empty held stack when entering mono so notes do not leak across voice modes.
 void mono_note_stack_clear() {
-  mono_note_stack_count = 0;
-}
-
-// Remove first match; no-op if note is not held.
-static void mono_note_stack_remove(uint8_t note) {
-  for (uint8_t i = 0; i < mono_note_stack_count; i++) {
-    if (mono_note_stack[i] != note) continue;
-    for (uint8_t j = i; j + 1u < mono_note_stack_count; j++) {
-      mono_note_stack[j] = mono_note_stack[j + 1u];
-    }
-    mono_note_stack_count--;
-    return;
-  }
-}
-
-// Re-strike moves to top; if full, drop oldest so the newest note still wins.
-static void mono_note_stack_push(uint8_t note) {
-  mono_note_stack_remove(note);
-  if (mono_note_stack_count >= MONO_NOTE_STACK_DEPTH) {
-    for (uint8_t i = 0; i + 1u < MONO_NOTE_STACK_DEPTH; i++) {
-      mono_note_stack[i] = mono_note_stack[i + 1u];
-    }
-    mono_note_stack_count = MONO_NOTE_STACK_DEPTH - 1u;
-  }
-  mono_note_stack[mono_note_stack_count++] = note;
-}
-
-static inline uint8_t mono_note_stack_top() {
-  return mono_note_stack[mono_note_stack_count - 1u];
+  monoStack.clear();
+  mono_sounding_note = MONO_NOTE_NONE;
 }
 
 // Register note/CC/program/pitch-bend handlers on USB + DIN MIDI. USB begin is in init_usb().
@@ -179,113 +155,85 @@ void handleAfterTouchChannel(byte channel, byte pressure) {
   mod_matrix_set_aftertouch(pressure);
 }
 
-// Allocate voice(s) from MIDI note-on per voiceMode/polyMode; set ADSR flags (EnvDCO/VCA/VCF are local).
-// Mono: last-note stack push, then VOICE_NOTES/gate/note_on_flag + noteStart (porta + ADSR).
+// Allocate voice(s) from MIDI note-on per voiceMode; set ADSR flags (EnvDCO/VCA/VCF are local).
+// Para steal policy and mono note priority both come from the allocation mode.
+// Mono: stack push, then VOICE_NOTES/gate/note_on_flag + noteStart (porta + ADSR).
 void note_on(uint8_t note, uint8_t velocity) {
-  mod_matrix_on_note_on();
+  const uint8_t alloc_mode = voiceAlloc.mode();
 
   switch (voiceMode) {
-    case 0:
-      // Last-note priority: stack top becomes the sounding pitch.
-      mono_note_stack_push(note);
-      VOICE_NOTES[0] = note;
-      midi_velocity[0] = velocity;
-      VOICES[0] = millis();
-      note_on_flag[0] = 1;
-      noteStart[0] = 1;
-      noteEnd[0] = 0;
+    case 0: {
+      // push() denies the key under VOICE_ALLOC_NO_STEAL: while one is down the
+      // rest are ignored outright, so they do not take over later either. That
+      // is what separates mode 5 from first-note priority.
+      if (!monoStack.push(note, alloc_mode)) return;
+
+      const uint8_t winner = monoStack.pick(alloc_mode);
+      // A key that loses priority (first/low/high modes) is held but stays silent.
+      if (winner == MONO_NOTE_NONE || winner == mono_sounding_note) return;
+
+      mod_matrix_on_note_on();
+      mono_sounding_note = winner;
+      voice_mark_on(0, winner, velocity);
       return;
+    }
 
-      break;
-
-    case 1:
-
-      if (polyMode == 0) {
-        if (STACK_VOICES < 2) {
-          for (int i = 0; i < NUM_VOICES; i++)  // REVISAR!!
-          {
-            if (VOICE_NOTES[i] == note) {
-              VOICES[i] = millis();
-              midi_velocity[i] = velocity;
-              note_on_flag[i] = 1;
-              noteStart[i] = 1;
-              return;  // note already playing
-            }
-          }
-        }
-
-        for (int i = 0; i < STACK_VOICES; i++) {  // REVISAR!! Quizas debiera ser NUM_VOICES y no STACK
-          uint8_t voice_num = get_free_voice();
-          VOICES[voice_num] = millis();
-          VOICE_NOTES[voice_num] = note;
-          midi_velocity[voice_num] = velocity;
-          note_on_flag[voice_num] = 1;
-          noteStart[voice_num] = 1;
-        }
+    case 1: {
+      // Same-note retrigger: reuse the voice already on this pitch rather than
+      // allocating a second one and stealing something else.
+      const uint8_t held = voiceAlloc.findNote(note);
+      if (held != VOICE_ALLOC_NONE) {
+        mod_matrix_on_note_on();
+        voice_mark_on(held, note, velocity);
+        return;
       }
 
-      if (polyMode == 1) {
-        if (STACK_VOICES < 2) {
-          for (int i = 0; i < NUM_VOICES; i++)  // REVISAR!!
-          {
-            if (VOICE_NOTES[i] == note) {
-              VOICES[i] = 1;
-              midi_velocity[i] = velocity;
-              note_on_flag[i] = 1;
-              noteStart[i] = 1;
-              noteEnd[i] = 0;
-              return;  // note already playing
-            }
-          }
-        }
+      const uint8_t voice_num = voice_alloc();
+      if (voice_num == VOICE_ALLOC_NONE) return;  // VOICE_ALLOC_NO_STEAL: drop the note
 
-        uint8_t voice_num = get_free_voice_sequential();
-        VOICES[voice_num] = 1;
-        VOICE_NOTES[voice_num] = note;
-        midi_velocity[voice_num] = velocity;
-        note_on_flag[voice_num] = 1;
-        noteStart[voice_num] = 1;
-        noteEnd[voice_num] = 0;
-      }
+      mod_matrix_on_note_on();
+      voice_mark_on(voice_num, note, velocity);
       break;
+    }
 
     case 2:
-      // Mode 2 stub: fill all capacity slots (DCO4 stack). Engine still only runs VOICE_TASK.
-      for (int i = 0; i < NUM_VOICES_TOTAL; i++)
-      {
-        VOICES[i] = 1;
-        VOICE_NOTES[i] = note;
-        midi_velocity[i] = velocity;
-        note_on_flag[i] = 1;
-        noteStart[i] = 1;
+      // Mode 2 stub: same note on every capacity slot (DCO4 stack), so nothing
+      // to allocate. Engine still only runs NUM_VOICES_VOICE_TASK.
+      mod_matrix_on_note_on();
+      for (int i = 0; i < NUM_VOICES_TOTAL; i++) {
+        voice_mark_on((uint8_t)i, note, velocity);
       }
       break;
+
     default:
       return;
-      break;
   }
   last_midi_pitch_bend = 0;
 }
 
 // Release matching voice(s) on MIDI note-off; set noteEnd flags for the local envelopes.
-// Mono: stack remove; empty → gate off; else fall back to top + note_on_flag (porta, no ADSR retrigger).
+// Mono: stack remove; empty → gate off; else fall back to the new priority winner
+// + note_on_flag (porta, no ADSR retrigger).
 void note_off(uint8_t note) {
   if (voiceMode == 0) {
-    const uint8_t prev_count = mono_note_stack_count;
-    mono_note_stack_remove(note);
-    if (mono_note_stack_count == prev_count) {
+    if (!monoStack.remove(note)) {
       return;  // note was not held
     }
-    if (mono_note_stack_count == 0) {
+    if (monoStack.empty()) {
       // Keep VOICE_NOTES so voice_task holds last pitch through release.
-      VOICES[0] = 0;
-      noteEnd[0] = 1;
-      noteStart[0] = 0;
+      mono_sounding_note = MONO_NOTE_NONE;
+      voice_mark_off(0);
       return;
     }
-    // Still holding other keys: sound new top; porta via note_on_flag only.
-    VOICE_NOTES[0] = mono_note_stack_top();
-    VOICES[0] = millis();
+    const uint8_t winner = monoStack.pick(voiceAlloc.mode());
+    // Releasing a key that was never sounding leaves the gated pitch alone.
+    if (winner == MONO_NOTE_NONE || winner == mono_sounding_note) return;
+
+    // Still holding other keys: sound the new winner; porta via note_on_flag only.
+    mono_sounding_note = winner;
+    VOICE_NOTES[0] = winner;
+    VOICES[0] = 1;
+    voiceAlloc.regate(0, winner);
     note_on_flag[0] = 1;
     noteEnd[0] = 0;
     return;
@@ -294,13 +242,10 @@ void note_off(uint8_t note) {
   // Para/poly: scan full capacity so a release is not missed if NUM_VOICES shrank mid-note.
   for (int i = 0; i < NUM_VOICES_TOTAL; i++)
   {
-    if (VOICE_NOTES[i] == note) {
+    if (VOICE_NOTES[i] == note && VOICES[i] != 0) {
       // Keep VOICE_NOTES so voice_task holds last pitch through release
       // (portaTime==0 snaps portamento_cur_freq from VOICE_NOTES each frame).
-      // Free-slot / steal uses VOICES[] only.
-      VOICES[i] = 0;
-      noteEnd[i] = 1;
-      noteStart[i] = 0;
+      voice_mark_off((uint8_t)i);
     }
   }
 }

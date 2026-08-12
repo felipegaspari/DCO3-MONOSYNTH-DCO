@@ -69,7 +69,12 @@ static inline __attribute__((always_inline)) float interpolate_live_ratio_f(floa
 void init_voices() {
   for (int i = 0; i < NUM_VOICES_TOTAL; i++) {
     VOICE_NOTES[i] = DCO_calibration_start_note;
+    VOICES[i] = 0;
   }
+
+  // EnvVCA levels let the allocator rank release tails by loudness and tell a
+  // finished tail from a live one.
+  voiceAlloc.begin(ADSR_VCA_Level_q15);
 
   initMultiplierTables();
   setVoiceMode();
@@ -1658,70 +1663,37 @@ void __not_in_flash_func(voice_task_float)() {
 }
 #endif  // USE_FLOAT_VOICE_TASK
 
-// Round-robin free-voice allocator. Called from note_on() when polyMode == 1.
-inline uint8_t get_free_voice_sequential() {
-  uint8_t nextVoice;
-  uint8_t freeVoices = 0;
+// --- Voice allocation --------------------------------------------------------
+// Thin adapters over the shared allocator (DCO-SHARED-LIBRARIES/voice_alloc.h,
+// instance in voice_alloc_state.h), which replaced get_free_voice() and
+// get_free_voice_sequential(). Every policy in VoiceAllocMode lives there;
+// these keep the sketch's gate flag, pitch table and ADSR edge flags in step
+// with the allocator's bookkeeping so no caller has to update both.
 
-  if (VOICES[VOICES_LAST_SEQUENCE[NUM_VOICES - 1]] == 1 || VOICES[VOICES_LAST_SEQUENCE[NUM_VOICES - 1]] == 0) {
-    for (int voiceIndex = NUM_VOICES - 1; voiceIndex > 0; voiceIndex--) {
-      if (VOICES[VOICES_LAST_SEQUENCE[voiceIndex]] == 0) {
-        nextVoice = VOICES_LAST_SEQUENCE[voiceIndex];
-        freeVoices = 1;
-        for (int freeIndex = voiceIndex; freeIndex > 0; freeIndex--) {
-          VOICES_LAST_SEQUENCE[freeIndex] = VOICES_LAST_SEQUENCE[freeIndex - 1];
-        }
-        VOICES_LAST_SEQUENCE[0] = nextVoice;
-        return nextVoice;
-      }
-    }
-  } else {
-    if (VOICES[VOICES_LAST_SEQUENCE[NUM_VOICES - 1]] == 0) {
-      nextVoice = VOICES_LAST_SEQUENCE[NUM_VOICES - 1];
-
-      for (int voiceIndex = NUM_VOICES - 1; voiceIndex > 0; voiceIndex--) {
-        VOICES_LAST_SEQUENCE[voiceIndex] = VOICES_LAST_SEQUENCE[voiceIndex - 1];
-      }
-
-      VOICES_LAST_SEQUENCE[0] = nextVoice;
-
-      return nextVoice;
-    }
-  }
-  if (freeVoices == 0) {
-    nextVoice = VOICES_LAST_SEQUENCE[NUM_VOICES - 1];
-
-    for (int voiceIndex = NUM_VOICES - 1; voiceIndex > 0; voiceIndex--) {
-      VOICES_LAST_SEQUENCE[voiceIndex] = VOICES_LAST_SEQUENCE[voiceIndex - 1];
-    }
-
-    VOICES_LAST_SEQUENCE[0] = nextVoice;
-  }
-  return nextVoice;
+// Choose a voice for an incoming note. Returns VOICE_ALLOC_NONE when the mode
+// refuses to steal.
+uint8_t voice_alloc() {
+  return voiceAlloc.alloc();
 }
 
-// Oldest-voice / steal allocator. Called from note_on() when polyMode == 0.
-inline uint8_t get_free_voice() {
-  uint32_t oldest_time = millis();
-  uint8_t oldest_voice = 0;
+// Mark a voice as sounding a new note. Shared by every note_on path so the
+// allocation bookkeeping never drifts from the gate flags.
+void voice_mark_on(uint8_t voice, uint8_t note, uint8_t velocity) {
+  VOICES[voice] = 1;
+  VOICE_NOTES[voice] = note;
+  midi_velocity[voice] = velocity;
+  note_on_flag[voice] = 1;
+  noteStart[voice] = 1;
+  noteEnd[voice] = 0;
+  voiceAlloc.markOn(voice, note);
+}
 
-  for (int i = 0; i < NUM_VOICES; i++)  // REVISAR!!
-  {
-    uint8_t n = (NEXT_VOICE + i) % NUM_VOICES;
-
-    if (VOICES[n] == 0) {
-      NEXT_VOICE = (n + 1) % NUM_VOICES;
-      return n;
-    }
-
-    if (VOICES[i] < oldest_time) {
-      oldest_time = VOICES[i];
-      oldest_voice = i;
-    }
-  }
-
-  NEXT_VOICE = (oldest_voice + 1) % NUM_VOICES;
-  return oldest_voice;
+// Gate a voice off and start tracking its release tail.
+void voice_mark_off(uint8_t voice) {
+  VOICES[voice] = 0;
+  noteEnd[voice] = 1;
+  noteStart[voice] = 0;
+  voiceAlloc.markOff(voice);
 }
 
 // Map voiceMode → NUM_VOICES / STACK_VOICES. Called from init_voices and apply_param_voice_mode.
@@ -1729,6 +1701,10 @@ inline uint8_t get_free_voice() {
 //   1 paraphonic: up to TOTAL notes, voice i → osc i (EnvDCO pitch tap per osc)
 //   2 stub:       DCO4 stack leftover — counts only; no new stack behavior
 inline void setVoiceMode() {
+  // Resync allocation state to the gates: a slot that NUM_VOICES dropped mid-note
+  // would otherwise come back HELD when the count grows again.
+  voiceAlloc.resyncFromGates(VOICES);
+
   switch (voiceMode) {
     case 0:
       NUM_VOICES = 1;
@@ -1745,6 +1721,8 @@ inline void setVoiceMode() {
       STACK_VOICES = NUM_VOICES_TOTAL;
       break;
   }
+
+  voiceAlloc.setVoiceCount(NUM_VOICES);
 }
 
 // Rebuild the PIO sync topology and retrigger voices.
@@ -1815,14 +1793,9 @@ static void __not_in_flash_func(amp_chan_levels_fixed)(int64_t freq_q24_A, int64
  * Find: per-osc ampWinCache → walk → full scan (same as FLOAT_QUAD).
  */
 uint16_t __not_in_flash_func(get_chan_level_lookup_fast)(int32_t x, uint8_t voiceN) {
-  const int32_t* freqRow   = ampCompFrequencyArray[voiceN];
-  const int32_t* ampRow    = ampCompArray[voiceN];
-  const int32_t* xBaseRow  = xBaseWIN[voiceN];
-  const int32_t* spanRow   = dxWIN[voiceN];
-  const uint32_t* invRow_q28 = invDxWIN_q28[voiceN];
-  const int32_t* aRow      = aQWIN_fast[voiceN];
-  const int32_t* bRow      = bQWIN_fast[voiceN];
-  const uint16_t* cRow     = cQWIN[voiceN];
+  const int32_t* freqRow = ampCompFrequencyArray[voiceN];
+  const int32_t* ampRow  = ampCompArray[voiceN];
+  const FixedQuadWindow* winRow = fixedWin[voiceN];
 
   if (x <= freqRow[0]) {
     BENCH_PATH_INC(amp_clamp);
@@ -1894,17 +1867,17 @@ uint16_t __not_in_flash_func(get_chan_level_lookup_fast)(int32_t x, uint8_t voic
     ampWinCache[voiceN] = (int16_t)window;
   }
 
-  int32_t dx = x - xBaseRow[window];
-  const int32_t span = spanRow[window];
+  int32_t dx = x - winRow[window].xBase;
+  const int32_t span = winRow[window].dx;
   if (dx < 0) dx = 0;
   if (dx > span) dx = span;
 
-  const uint32_t inv_q28 = invRow_q28[window];
+  const uint32_t inv_q28 = winRow[window].invDx_q28;
   uint32_t t_q = (uint32_t)(((uint64_t)dx * inv_q28) >> (28 - T_FRAC));
 
-  const int32_t a = aRow[window];
-  const int32_t b = bRow[window];
-  const int32_t c = (int32_t)cRow[window];
+  const int32_t a = winRow[window].aQ_fast;
+  const int32_t b = winRow[window].bQ_fast;
+  const int32_t c = (int32_t)winRow[window].cQ;
 
   uint32_t t2 = (uint32_t)(((uint32_t)t_q * t_q) >> T_FRAC);
   int32_t term_a, term_b;
@@ -1998,11 +1971,9 @@ uint16_t __not_in_flash_func(get_chan_level_float_quad)(float freqHz, uint8_t vo
     ampWinCache[voiceN] = (int16_t)window;
   }
 
-  float a = aCoeff[voiceN][window];
-  float b = bCoeff[voiceN][window];
-  float c = cCoeff[voiceN][window];
+  const FloatQuadCoeffs& coeff = floatCoeffs[voiceN][window];
 
-  float interpolatedValue = (a * freqHz + b) * freqHz + c;
+  float interpolatedValue = (coeff.a * freqHz + coeff.b) * freqHz + coeff.c;
   return (uint16_t)round(interpolatedValue);
 }
 
@@ -2108,6 +2079,15 @@ void voice_task_autotune(uint8_t taskAutotuneVoiceMode, uint16_t calibrationValu
 
         write_range_pwm((uint8_t)i, calibrationValue);
 
+        // NOTE (frame of reference): manual calibration drives the PW channel
+        // at 0 while every auto-cal probe runs at PW_CENTER[0] (the value the
+        // PW stage calibrated to 50% duty). Both stages ask the user/search
+        // for "50% duty", but they read it at two different comparator
+        // thresholds, so a value dialled by hand (ampComp440) can be
+        // systematically offset from what the trace measures. FREQ_TRACE
+        // therefore treats the stored 440 Hz value as a seed and re-measures
+        // it ([FREQ_TRACE_ANCHOR]). Left as is on purpose: changing manual
+        // mode would invalidate the existing trimpot procedure.
         pwm_set_chan_level(PW_PWM_SLICES[0], pwm_gpio_to_channel(PW_PINS[0]), 0);
 
         //Serial.println((String) "currentCalibrationOscillator: " + (int)currentCalibrationOscillator + (String) "   calibrationValue: " + (int)calibrationValue);

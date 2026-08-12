@@ -140,7 +140,7 @@ switches are obvious:
 ```
 =================== DCO BENCH ===================
 clk_sys 250 MHz   probe overhead 2 cyc   stages every 9
-engine: mcu=RP2040 voice=FIXED pitch=RATIO_Q16 amp=FIXED cv=FIXED amp_method=FIXED clkdiv=Q16 note_retrig=EXACT_Y
+engine: mcu=RP2040 voice=FIXED pitch=RATIO_Q16 amp=FIXED cv=FIXED amp_method=FIXED clkdiv=Q16 note_retrig=EXACT_Y amp_cal=CLASSIC
 adsr:   phase=22 float=0 micros=1 native_q15=1 dyadic=1 q15_cache=1 sram_hot=1
 lfo:    sram_hot=1
 noise:  engine=1 out=0
@@ -150,7 +150,7 @@ bench:  amp_comp=0 path_stats=0
 
 | Line | Fields |
 |------|--------|
-| `engine:` | `mcu` (board package); `voice` / `amp` / `cv` (`USE_FLOAT_VOICE_TASK` / `USE_FLOAT_AMP_COMP` / `USE_FLOAT_CV_OUTS`); `pitch` (`PITCH_INTERP_MODE`); `amp_method` (live); `clkdiv` (`CLKDIV_MODE` → `GOLD`/`FLOAT`/`Q16`/`Q8`/`FAST_Q4`; both voice engines); `note_retrig` (live) |
+| `engine:` | `mcu` (board package); `voice` / `amp` / `cv` (`USE_FLOAT_VOICE_TASK` / `USE_FLOAT_AMP_COMP` / `USE_FLOAT_CV_OUTS`); `pitch` (`PITCH_INTERP_MODE`); `amp_method` (live); `clkdiv` (`CLKDIV_MODE` → `GOLD`/`FLOAT`/`Q16`/`Q8`/`FAST_Q4`; both voice engines); `note_retrig` (live); `amp_cal` (live auto-cal method, cmds 34/35; boot value from `AUTOTUNE_AMP_METHOD_DEFAULT`) |
 | `adsr:` | `ADSR_BEZIER_*` from [`../adsr.h`](../adsr.h): `phase`, `float`, `micros`, `native_q15`, `dyadic`, `q15_cache`, `sram_hot` |
 | `lfo:` | `MO_LFO_SRAM_HOT` from [`../LFO.h`](../LFO.h) |
 | `noise:` | `NOISE_ENGINE`, `ENABLE_NOISE_OUT` → `out` |

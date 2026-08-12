@@ -129,6 +129,35 @@
 //#define ENABLE_NOISE_OUT
 
 // =============================================================================
+// CALIBRATION — auto-cal boot defaults (runtime: Calibration tab debug cmds)
+// =============================================================================
+// Amp-comp method: 0 CLASSIC (per-note range-PWM search), 1 FREQ_TRACE
+// (fixed-PWM frequency bisection; needs the manual 440 Hz anchor). Cmds 34/35.
+#ifndef AUTOTUNE_AMP_METHOD_DEFAULT
+#define AUTOTUNE_AMP_METHOD_DEFAULT 1
+#endif
+// Frequency-search close-in: 0 BISECT, 1 INTERP, 2 GATED. Cmds 37/38/39.
+#ifndef AUTOTUNE_SEARCH_MODE_DEFAULT
+#define AUTOTUNE_SEARCH_MODE_DEFAULT 1
+#endif
+// Amp-comp-0 endpoint (pair 0): 0 MEASURE (live hunt), 1 CALC (bottom-rung fit).
+// Cmds 40/41.
+#ifndef AUTOTUNE_AMP0_MODE_DEFAULT
+#define AUTOTUNE_AMP0_MODE_DEFAULT 1
+#endif
+// Overrides (uncomment to force; #undef first):
+// #undef AUTOTUNE_AMP_METHOD_DEFAULT
+// #define AUTOTUNE_AMP_METHOD_DEFAULT 0   // CLASSIC
+// #define AUTOTUNE_AMP_METHOD_DEFAULT 1   // FREQ_TRACE
+// #undef AUTOTUNE_SEARCH_MODE_DEFAULT
+// #define AUTOTUNE_SEARCH_MODE_DEFAULT 0  // BISECT
+// #define AUTOTUNE_SEARCH_MODE_DEFAULT 1  // INTERP
+// #define AUTOTUNE_SEARCH_MODE_DEFAULT 2  // GATED
+// #undef AUTOTUNE_AMP0_MODE_DEFAULT
+// #define AUTOTUNE_AMP0_MODE_DEFAULT 0    // MEASURE
+// #define AUTOTUNE_AMP0_MODE_DEFAULT 1    // CALC
+
+// =============================================================================
 // PROFILING / BENCH (see docs/BENCHMARKING.md)
 // =============================================================================
 // RUNNING_AVERAGE: hot-path profiler in bench.h (count/mean/min/max/total + core share).
@@ -430,14 +459,39 @@ void __not_in_flash_func(loop1)() {
 
   if (calibrationFlag == true) {
     if (manualCalibrationFlag == true) {
-      VOICE_NOTES[0] = manual_DCO_calibration_start_note;
-      DCO_calibration_current_note = manual_DCO_calibration_start_note;
       // Keep currentDCO in sync so [GAP_MEASURE]/[GAP_TIMEOUT] logs match the soloed osc.
       currentDCO = manualCalibrationStage;
       if (currentDCO >= NUM_OSCILLATORS) {
         currentDCO = NUM_OSCILLATORS - 1;
       }
-      ampCompCalibrationVal = initManualAmpCompCalibrationValPreset + manualCalibrationOffset[manualCalibrationStage];
+
+      if (manualCalibrationStep == 1) {
+        // Step 2: dial in the per-osc amp-comp value at 440 Hz (A4). The
+        // stored value anchors the FREQ_TRACE calibration curve, and the
+        // fast duty feedback (~27x quicker than the low note) makes the
+        // adjustment feel live.
+        VOICE_NOTES[0] = manual_cal_reference_note;
+        DCO_calibration_current_note = manual_cal_reference_note;
+        if (ampComp440[currentDCO] != 0) {
+          ampCompCalibrationVal = ampComp440[currentDCO];
+        } else {
+          // First entry for this osc: drive near the expected operating point
+          // by scaling the trimmed low-note value with the frequency ratio
+          // (charge current, hence range PWM, is roughly proportional to
+          // frequency). Do not write ampComp440[] — 0 means "never set" and
+          // Store would persist a seed the user never confirmed.
+          float scale = note_to_freq(manual_cal_reference_note) /
+                        note_to_freq(manual_DCO_calibration_start_note);
+          ampCompCalibrationVal = (uint16_t)(
+            (initManualAmpCompCalibrationValPreset + manualCalibrationOffset[currentDCO]) * scale + 0.5f);
+        }
+      } else {
+        // Step 1: trimpot stage at the low starting note (same reference the
+        // PW calibration and the classic amp-comp method assume).
+        VOICE_NOTES[0] = manual_DCO_calibration_start_note;
+        DCO_calibration_current_note = manual_DCO_calibration_start_note;
+        ampCompCalibrationVal = initManualAmpCompCalibrationValPreset + manualCalibrationOffset[currentDCO];
+      }
       voice_task_autotune(0, ampCompCalibrationVal);
       update_CV_outs_manual_calibration();
       // In manual calibration mode, continuously measure and report the duty
@@ -448,6 +502,12 @@ void __not_in_flash_func(loop1)() {
     } else {
       DCO_calibration();
     }
+  } else if (calibrationVerifyRequested) {
+    // Debug command 36 (core 0). The sweep blocks this core for as long as it
+    // takes and raises calibrationFlag itself, so the voice task stays off
+    // these oscillators until it is done.
+    calibrationVerifyRequested = false;
+    run_calibration_verify_sweep();
   } else {
 
     pio_defer_service();

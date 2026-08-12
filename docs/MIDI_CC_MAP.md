@@ -28,6 +28,7 @@ Menu-style parameters use a 0..127 range so the scaling is an identity and a men
 | 22 | Sub-oscillator divide | Oscillators | `PARAM_SUBOSC_DIVIDE` | 0 | 127 | linear |
 | 23 | Osc sync / phase align OSC2 | Oscillators | `PARAM_OSC_SYNC_MODE` | 0 | 127 | linear |
 | 69 | Voice mode | Oscillators | `PARAM_VOICE_MODE` | 0 | 127 | linear |
+| 78 | Voice alloc / note priority | Oscillators | `PARAM_VOICE_ALLOC_MODE` | 0 | 127 | linear |
 | 70 | Unison detune | Oscillators | `PARAM_UNISON_DETUNE` | 0 | 127 | linear |
 | 71 | Portamento time | Oscillators | `PARAM_PORTAMENTO_TIME` | 0 | 255 | linear |
 | 72 | Portamento mode | Oscillators | `PARAM_PORTAMENTO_MODE` | 0 | 127 | linear |
@@ -121,7 +122,6 @@ Menu-style parameters use a 0..127 range so the scaling is an identity and a men
 | 109 | Mod slot 7 source | Mod matrix | `PARAM_MOD_SLOT7_SOURCE` | 0 | 127 | linear |
 | 110 | Mod slot 7 dest | Mod matrix | `PARAM_MOD_SLOT7_DEST` | 0 | 127 | linear |
 | 111 | Mod slot 7 depth | Mod matrix | `PARAM_MOD_SLOT7_DEPTH` | -4095 | 4095 | linear |
-| 78 | Manual calibration mode | Calibration | `PARAM_MANUAL_CALIBRATION_FLAG` | 0 | 1 | linear |
 | 79 | Manual cal stage (osc) | Calibration | `PARAM_MANUAL_CALIBRATION_STAGE` | 0 | 2 | linear |
 | 80 | Manual cal offset | Calibration | `PARAM_MANUAL_CALIBRATION_OFFSET` | -20 | 20 | linear |
 
@@ -140,7 +140,9 @@ These parameters take discrete values; the CC number to send is the value itself
   - Off leaves the oscillators running through note-on; every other setting restarts OSC1 and OSC2 together there, the degree entries delaying OSC2's first flyback (EXACT_Y). Changing this retriggers all notes.
   - out of 7-bit reach, use the serial bench app instead: Sync + 300 deg (150), Sync + 330 deg (165)
 - **CC 69, Voice mode**: 0 - mono = 0, 1 - poly = 1, 2 - stack = 2
-  - Mono (`0`) uses a last-note-priority held-note stack (overlapping keys; release falls back and retriggers porta). See [`REFERENCE_AI.md`](REFERENCE_AI.md) (`note_on` / `note_off`).
+  - Mono (`0`) keeps a held-note stack, so overlapping keys fall back and retrigger porta on release; which of the held keys sounds is 'Voice alloc / note priority' below. See [`REFERENCE_AI.md`](REFERENCE_AI.md) (`note_on` / `note_off`).
+- **CC 78, Voice alloc / note priority**: 0 - round-robin / last note = 0, 1 - oldest / first note = 1, 2 - quietest / last note = 2, 3 - quietest, keep lowest / low note = 3, 4 - quietest, keep highest / high note = 4, 5 - no stealing / first note, deny = 5
+  - One setting, two jobs. In poly/para it is the steal policy used when every voice is busy; in mono it is which held key sounds. Every stealing mode takes an idle voice first, then the quietest release tail, and only steals a held note as a last resort. `5` drops the note-on instead of stealing. See [`REFERENCE_AI.md`](REFERENCE_AI.md) (`voice_alloc`).
 - **CC 72, Portamento mode**: 0 - fixed time (same duration any interval) = 0, 1 - slew rate (time scales with interval; knob = time per octave) = 1
 - **CC 25, ADSR3 to osc select**: 0 - OSC1 = 0, 1 - OSC2 = 1, 2 - OSC1+2 = 2, 3 - OSC3 = 3, 4 - all = 4
 - **CC 27, ADSR1 attack curve**: 0 - EXP = 0, 1 - SOFT = 1, 2 - STEEP = 2, 3 - CONCAVE = 3, 4 - FAST S = 4, 5 - SLOW THEN LIN = 5, 6 - ALMOST LIN = 6, 7 - LINEAR = 7
@@ -200,7 +202,11 @@ Every non-reserved 7-bit controller is already assigned (0 free). Sub-oscillator
 - **EnvDCO pitch centered** (parameter 223)
 - **LFO2 to OSC3 coarse** (parameter 220)
 - **Character** (parameter 221)
-- **Run autotune** (parameter 150)
+- **Run calibration** (parameter 150)
+- **Manual calibration mode** (parameter 151)
+- **Manual cal step (440 Hz)** (parameter 158)
+- **Amp comp @ 440 Hz** (parameter 159)
+- **Duty trim (0.01%)** (parameter 161)
 - **Store manual cal offsets** (parameter 156)
 
 Autotune takes the board over for about a minute and the store writes the filesystem, so neither should be one stray controller away. Both are still available from the serial bench app in `DCO-CONTROL-PANEL`.

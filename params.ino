@@ -321,6 +321,12 @@ static void apply_param_voice_mode(int16_t v) {
   setVoiceMode();
 }
 
+// PARAM_VOICE_ALLOC_MODE: para steal policy / mono note priority (VoiceAllocMode).
+static void apply_param_voice_alloc_mode(int16_t v) {
+  if (v < 0) return;
+  voiceAlloc.setMode((uint8_t)v);
+}
+
 // PARAM_UNISON_DETUNE: unison detune amount.
 static void apply_param_unison_detune(int16_t v) {
   unisonDetune = v;
@@ -551,9 +557,36 @@ static void apply_param_function_key(int16_t /*v*/) {
 static void apply_param_gap_from_dco(int16_t /*v*/) {
 }
 
-// PARAM_CALIBRATION_FLAG: start/stop auto-cal (loop1 runs DCO_calibration when set).
+// PARAM_CALIBRATION_FLAG: start/stop auto-cal (loop1 runs DCO_calibration when
+// set). The value selects the stage and how carefully it measures:
+// 1 = amp-comp only, 2 = PW only, 3 = full at NORMAL precision (build from
+// scratch, fast); 5/6/7 = the same three stages at FINE precision, where the
+// amp stage re-measures the stored table instead of building a new one;
+// 9/10/11 = the same stages at FAST precision (quickest from-scratch build,
+// for a testing table).
 static void apply_param_calibration_flag(int16_t v) {
-  calibrationFlag = v;
+  if (v == 0) {
+    // Runs on core 0 while DCO_calibration() may be blocking core 1: request
+    // a cancel; the calibration loops poll this and unwind cleanly.
+    calibrationCancelRequested = true;
+    calibrationFlag = false;
+    return;
+  }
+
+  if (v >= 9 && v <= 11) {
+    calibrationPrecision = CAL_PRECISION_FAST;
+    v -= 8;
+  } else if (v >= 5 && v <= 7) {
+    calibrationPrecision = CAL_PRECISION_FINE;
+    v -= 4;
+  } else {
+    calibrationPrecision = CAL_PRECISION_NORMAL;
+  }
+
+  calibrationScope = (v == CAL_SCOPE_AMP || v == CAL_SCOPE_PW)
+                       ? (uint8_t)v
+                       : (uint8_t)CAL_SCOPE_FULL;
+  calibrationFlag = true;
 }
 
 // PARAM_MANUAL_CALIBRATION_FLAG: enter/exit manual cal; rising edge TX offsets to Input/Mainboard.
@@ -579,8 +612,44 @@ static void apply_param_manual_calibration_flag(int16_t v) {
     update_waveSelector();
   }
 
+  // Every manual-cal entry starts at the trimpot step; the UI switches to the
+  // 440 Hz step explicitly via PARAM_MANUAL_CALIBRATION_STEP.
+  if (v != 0 && !manualCalibrationFlag) {
+    manualCalibrationStep = 0;
+  }
+
   manualCalibrationFlag = v;
   calibrationFlag       = v;
+}
+
+// PARAM_MANUAL_CALIBRATION_STEP: 0 = trimpot stage at the low starting note,
+// 1 = 440 Hz amp-set stage (adjust PARAM_AMP_COMP_440 until duty = 50%).
+static void apply_param_manual_calibration_step(int16_t v) {
+  manualCalibrationStep = (v != 0) ? 1 : 0;
+}
+
+// PARAM_AMP_COMP_440: absolute range-PWM at 440 Hz for the oscillator selected
+// by manualCalibrationStage. Persisted by PARAM_MANUAL_CALIBRATION_STORE.
+static void apply_param_amp_comp_440(int16_t v) {
+  uint8_t stage = (uint8_t)manualCalibrationStage;
+  if (stage >= NUM_OSCILLATORS) stage = NUM_OSCILLATORS - 1;
+  if (v < 0) v = 0;
+  uint16_t val = (uint16_t)v;
+  if (val > DIV_COUNTER) val = DIV_COUNTER;
+  ampComp440[stage] = val;
+}
+
+// PARAM_AMP_COMP_DUTY_OFFSET: duty target trim (hundredths of a percent) for
+// the oscillator selected by manualCalibrationStage. Nulls the difference
+// between the sense pin's 50% and the scope's 50%; both amp-comp methods and
+// the manual duty readout aim at 50% + this value. Persisted by
+// PARAM_MANUAL_CALIBRATION_STORE.
+static void apply_param_amp_comp_duty_offset(int16_t v) {
+  uint8_t stage = (uint8_t)manualCalibrationStage;
+  if (stage >= NUM_OSCILLATORS) stage = NUM_OSCILLATORS - 1;
+  if (v < -500) v = -500;
+  if (v >  500) v =  500;
+  ampCompDutyOffset[stage] = v;
 }
 
 // PARAM_MANUAL_CALIBRATION_STAGE: which osc/stage is being edited in manual cal UI.
@@ -598,12 +667,15 @@ static void apply_param_manual_calibration_offset(int16_t v) {
   manualCalibrationOffset[stage] = (int8_t)v;
 }
 
-// Explicit "store manual calibration offsets" command. This is called when
-// the user confirms manual calibration on the input controller, and is the
-// only place where we persist manualCalibrationOffset[] to the filesystem.
+// Explicit "store manual calibration" command. This is called when the user
+// confirms manual calibration, and is the only place where we persist
+// manualCalibrationOffset[], ampComp440[] and ampCompDutyOffset[] to the
+// filesystem.
 static void apply_param_manual_calibration_store(int16_t /*v*/) {
   for (uint8_t osc = 0; osc < NUM_OSCILLATORS; ++osc) {
     update_FS_ManualCalibrationOffset(osc, manualCalibrationOffset[osc]);
+    update_FS_AmpComp440(osc, ampComp440[osc]);
+    update_FS_AmpCompDutyOffset(osc, ampCompDutyOffset[osc]);
   }
 }
 
@@ -801,6 +873,50 @@ static void apply_param_debug_command(int16_t v) {
     case 30:
       seed_fake_calibration_tables(true);
       break;
+    // Read-only [CAL_VERIFY] pass over the stored tables. Every probe blocks on
+    // a duty measurement, so core 1 runs it from loop1(); this only asks.
+    case 36:
+      calibrationVerifyRequested = true;
+      break;
+    // Amp-comp calibration method A/B (runtime-only, classic is boot default).
+    case 34:
+    case 35:
+      autotuneAmpMethod = (v == 35) ? AMP_METHOD_FREQ_TRACE : AMP_METHOD_CLASSIC;
+      Serial.printf("autotuneAmpMethod=%s (%s)\n",
+                    autotune_amp_method_name(autotuneAmpMethod),
+                    (autotuneAmpMethod == AMP_METHOD_FREQ_TRACE)
+                      ? "fixed-PWM freq bisection"
+                      : "per-note PWM search");
+      break;
+    // Frequency-search convergence A/B: how find_freq_for_duty50() picks the
+    // next probe once the answer is bracketed. Compare on the probes= and
+    // elapsed= figures in the [CAL_REPORT] footer.
+    case 37:
+    case 38:
+    case 39:
+      autotuneSearchMode = (v == 37) ? SEARCH_BISECT
+                         : (v == 38) ? SEARCH_INTERP
+                                     : SEARCH_GATED;
+      Serial.printf("autotuneSearchMode=%s (%s)\n",
+                    autotune_search_mode_name(autotuneSearchMode),
+                    (autotuneSearchMode == SEARCH_BISECT)
+                      ? "geometric midpoint, sign only"
+                      : (autotuneSearchMode == SEARCH_INTERP)
+                          ? "Illinois secant in log-frequency"
+                          : "secant above the noise, midpoint below");
+      break;
+    // Amp-comp-0 endpoint A/B: hunt for the lowest reachable frequency live,
+    // or skip the hunt and store the least-squares fit through the bottom
+    // rungs (runtime-only, MEASURE is the boot default).
+    case 40:
+    case 41:
+      autotuneAmp0Mode = (v == 41) ? AMP0_MODE_CALC : AMP0_MODE_MEASURE;
+      Serial.printf("autotuneAmp0Mode=%s (%s)\n",
+                    autotune_amp0_mode_name(autotuneAmp0Mode),
+                    (autotuneAmp0Mode == AMP0_MODE_CALC)
+                      ? "store the bottom-rung fit, no live hunt"
+                      : "scan + bounded search at amp comp 0");
+      break;
     // Note-on sync retrigger A/B (oscSync >= 1): EXACT_Y vs SYNC_JMP.
     case 26:
       note_retrig_set_mode(NOTE_RETRIG_EXACT_Y);
@@ -866,6 +982,7 @@ static const ParamDescriptorT<int16_t> paramTable[] = {
   { PARAM_SUB_LEVEL,                 apply_param_sub_level },
   { PARAM_CALIBRATION_VALUE,         apply_param_calibration_value },
   { PARAM_VOICE_MODE,                apply_param_voice_mode },
+  { PARAM_VOICE_ALLOC_MODE,          apply_param_voice_alloc_mode },
   { PARAM_UNISON_DETUNE,             apply_param_unison_detune },
   { PARAM_ANALOG_DRIFT_AMOUNT,       apply_param_analog_drift_amount },
   { PARAM_ANALOG_DRIFT_SPEED,        apply_param_analog_drift_speed },
@@ -934,6 +1051,9 @@ static const ParamDescriptorT<int16_t> paramTable[] = {
   { PARAM_MANUAL_CALIBRATION_FLAG,   apply_param_manual_calibration_flag },
   { PARAM_MANUAL_CALIBRATION_STAGE,  apply_param_manual_calibration_stage },
   { PARAM_MANUAL_CALIBRATION_OFFSET, apply_param_manual_calibration_offset },
+  { PARAM_MANUAL_CALIBRATION_STEP,   apply_param_manual_calibration_step },
+  { PARAM_AMP_COMP_440,              apply_param_amp_comp_440 },
+  { PARAM_AMP_COMP_DUTY_OFFSET,      apply_param_amp_comp_duty_offset },
   { PARAM_GAP_FROM_DCO,              apply_param_gap_from_dco },
   { PARAM_MANUAL_CALIBRATION_STORE,  apply_param_manual_calibration_store },
   { PARAM_PRESET_SAVE,               apply_param_preset_save },

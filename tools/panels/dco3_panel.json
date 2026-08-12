@@ -375,6 +375,39 @@
           },
           {
             "type": "panel",
+            "id": "cell_cc78_voice_alloc_note_priority",
+            "layout": "vertical",
+            "scroll": false,
+            "innerPadding": false,
+            "padding": 4,
+            "css": "grid-row: span 5;",
+            "widgets": [
+              {
+                "type": "menu",
+                "id": "cc78_voice_alloc_note_priority",
+                "address": "/control",
+                "preArgs": [
+                  1,
+                  78
+                ],
+                "target": "midi:dco3",
+                "default": 0,
+                "expand": true,
+                "html": "Voice alloc / note priority",
+                "css": "> .html { white-space: normal; line-height: 1.15em; font-size: 85%; }",
+                "values": {
+                  "0 - round-robin / last note ": 0,
+                  "1 - oldest / first note ": 1,
+                  "2 - quietest / last note ": 2,
+                  "3 - quietest, keep lowest / low note ": 3,
+                  "4 - quietest, keep highest / high note ": 4,
+                  "5 - no stealing / first note, deny ": 5
+                }
+              }
+            ]
+          },
+          {
+            "type": "panel",
             "id": "cell_cc70_unison_detune",
             "layout": "vertical",
             "scroll": false,
@@ -3953,35 +3986,6 @@
         "padding": 10,
         "colorWidget": "#8d97a3",
         "widgets": [
-          {
-            "type": "panel",
-            "id": "cell_cc78_manual_calibration_mode",
-            "layout": "vertical",
-            "scroll": false,
-            "innerPadding": false,
-            "padding": 4,
-            "css": "grid-row: span 5;",
-            "widgets": [
-              {
-                "type": "switch",
-                "id": "cc78_manual_calibration_mode",
-                "address": "/control",
-                "preArgs": [
-                  1,
-                  78
-                ],
-                "target": "midi:dco3",
-                "default": 0,
-                "expand": true,
-                "html": "Manual calibration mode",
-                "css": "> .html { white-space: normal; line-height: 1.15em; font-size: 85%; }",
-                "values": {
-                  "Off ": 0,
-                  "On ": 127
-                }
-              }
-            ]
-          },
           {
             "type": "panel",
             "id": "cell_cc79_manual_cal_stage_osc",

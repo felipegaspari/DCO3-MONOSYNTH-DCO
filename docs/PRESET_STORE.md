@@ -1,7 +1,7 @@
 # MCU Preset Store & Calibration Dump
 
 LittleFS-backed **256-slot presets** on the DCO board, plus host dump/restore for
-presets and the five calibration tables. Host UI:
+presets and the seven calibration tables. Host UI:
 [`tools/dco_control`](../tools/dco_control/README.md). Serial how-to:
 [`README_serial_and_params.md`](README_serial_and_params.md).
 
@@ -41,6 +41,8 @@ Instead, slots are packed **4 records per chunk file**:
 | `voiceTables` | 528 B | Amp-comp bank (`FSBankSize`, 3 osc × 22 pairs) |
 | `PWCenter` / `PWHighLimit` / `PWLowLimit` | 6 B each | `FSPWBankSize` |
 | `ManualOffset` | 3 B | `FSManualOffsetBankSize` |
+| `AmpComp440` | 6 B | `FSAmpComp440BankSize` (u16/osc, 440 Hz manual anchor) |
+| `AmpCompDutyOffset` | 6 B | `FSAmpCompDutyOffsetBankSize` (i16/osc, duty target trim in 0.01%) |
 
 **Addressing:** `chunk = slot >> 2`, `offset = (slot & 3) * 598`.
 
@@ -98,7 +100,7 @@ blocks write globals + dirty flags and are mirrored to Input via
 | `'p'` `PARAM_PRESET_LOAD` (171) = slot | Recall slot (also MIDI PC + Bank Select; see §5) |
 | `'p'` `PARAM_PRESET_DUMP` (172) = −1 | Directory listing (`[pdir]` lines) |
 | `'p'` `PARAM_PRESET_DUMP` (172) = 0..255 | Hex dump of that slot record |
-| `'p'` `PARAM_CAL_DUMP` (173) | 0/−1 = all five cal files; 1..5 = one (`CAL_DUMP_*`) |
+| `'p'` `PARAM_CAL_DUMP` (173) | 0/−1 = all cal files; 1..7 = one (`CAL_DUMP_*`) |
 | `'q'` | 16-char name before SAVE (board stores `presetName[16]`) |
 | `'B'` | Bulk chunk: `[target][slot][offset:u16 LE][32 data]` → staging RAM |
 | `'C'` | Bulk commit: `[target][slot][size:u16 LE][crc32 LE]` → verify + LittleFS write |
@@ -130,12 +132,12 @@ every successful `preset_store_load()`. `dco_control` (USB host) uses `'p'`
 `PARAM_PRESET_DUMP` / `[pdir]` text instead of `'N'`/`'O'`/`'L'`.
 
 **Bulk targets** (`PresetBulkTarget`): `0` preset record, `1` voiceTables, `2` PWCenter,
-`3` PWHighLimit, `4` PWLowLimit, `5` ManualOffset. Calibration commits call
-`write_fs_bank()` then `init_FS()` (and amp-comp precompute for voiceTables).
+`3` PWHighLimit, `4` PWLowLimit, `5` ManualOffset, `6` AmpComp440, `7` AmpCompDutyOffset. Calibration commits
+call `write_fs_bank()` then `init_FS()` (and amp-comp precompute for voiceTables).
 
 **Calibration dump sizes are clamped, not raw file sizes.** `dump_fs_file()` always
 sends the compile-time bank size (`FSBankSize` / `FSPWBankSize` /
-`FSManualOffsetBankSize`, per target), the same leading bytes `init_FS()` reads at
+`FSManualOffsetBankSize` / `FSAmpComp440BankSize` / `FSAmpCompDutyOffsetBankSize`, per target), the same leading bytes `init_FS()` reads at
 boot — never the LittleFS file's actual on-disk size. A cal file can be larger than
 that on flash (e.g. a leftover from a firmware build with a different
 `NUM_OSCILLATORS`); the extra trailing bytes are unused and are not sent. If the
@@ -199,7 +201,7 @@ Tagged JSON so patch / bank / cal files cannot be mixed up:
 |------------|----------|
 | `dco3-patch` | One slot: `name`, `params`, `blocks` (linear ADSR fader domain) |
 | `dco3-bank` | Full 256-slot bank (`version`, `current`, `slots`) |
-| `dco3-cal` | Decoded tables: `amp_comp`, `pw_center`, `pw_high_limit`, `pw_low_limit`, `manual_offset` |
+| `dco3-cal` | Decoded tables: `amp_comp`, `pw_center`, `pw_high_limit`, `pw_low_limit`, `manual_offset`, `amp_comp_440`, `amp_comp_duty` |
 
 Host ↔ MCU record codec converts ADSR A/D/R between UI linear 0..4095 and the exp
 wire domain 0..25000 (`lin_to_exp` / `exp_to_lin`).

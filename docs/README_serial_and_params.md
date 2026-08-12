@@ -58,11 +58,20 @@ the way a preset recall does. MIDI Program Change recalls a preset slot
 | 170 | `PARAM_PRESET_SAVE` | slot 0..255 — save live state to LittleFS |
 | 171 | `PARAM_PRESET_LOAD` | slot 0..255 — recall (same as MIDI PC + bank) |
 | 172 | `PARAM_PRESET_DUMP` | −1 = `[pdir]` listing; 0..255 = slot record hex dump |
-| 173 | `PARAM_CAL_DUMP` | 0/−1 = all cal tables; 1..6 = one table |
+| 173 | `PARAM_CAL_DUMP` | 0/−1 = all cal tables; 1..7 = one table |
 
 These are deliberately off the MIDI CC map (filesystem access and long dumps).
 See [`PRESET_STORE.md`](PRESET_STORE.md) and the host tool at
 [`DCO-CONTROL-PANEL`](../../DCO-CONTROL-PANEL/README.md).
+
+`PARAM_CALIBRATION_FLAG` (**150**) is shared with Input and Screen, but the DCO
+reads more out of its value than their menus send: **1/2/3** run the amp-comp,
+PW or full stage at normal precision, **5/6/7** run the same three at fine
+precision (much more careful measurements, and the amp stage re-measures the
+stored table instead of rebuilding it — see
+[`CALIBRATION_PROCEDURE.md`](CALIBRATION_PROCEDURE.md)), and **0** cancels a
+running pass. The Input and Screen menus always send 1/2/3; fine mode is
+reachable from the panel and over USB.
 
 ## Adding a parameter here
 

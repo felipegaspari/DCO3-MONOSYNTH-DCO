@@ -64,18 +64,22 @@ enum PresetBulkTarget : uint8_t {
   PRESET_BULK_PW_HIGH_LIMIT = 3,
   PRESET_BULK_PW_LOW_LIMIT  = 4,
   PRESET_BULK_MANUAL_OFFSET = 5,
+  PRESET_BULK_AMP_COMP_440  = 6,  // 440 Hz manual anchor bank (FSAmpComp440BankSize)
+  PRESET_BULK_AMP_COMP_DUTY = 7,  // duty target trims (FSAmpCompDutyOffsetBankSize)
 };
 
 static constexpr uint8_t  PRESET_BULK_CHUNK_DATA   = 32;
 static constexpr uint16_t PRESET_BULK_STAGING_SIZE = 640;  // >= record 598, voiceTables 528
 
-// Calibration dump selectors (PARAM_CAL_DUMP value). 0 / -1 = all five tables.
+// Calibration dump selectors (PARAM_CAL_DUMP value). 0 / -1 = all tables.
 static constexpr int16_t CAL_DUMP_ALL           = 0;
 static constexpr int16_t CAL_DUMP_VOICE_TABLES  = 1;
 static constexpr int16_t CAL_DUMP_PW_CENTER     = 2;
 static constexpr int16_t CAL_DUMP_PW_HIGH_LIMIT = 3;
 static constexpr int16_t CAL_DUMP_PW_LOW_LIMIT  = 4;
 static constexpr int16_t CAL_DUMP_MANUAL_OFFSET = 5;
+static constexpr int16_t CAL_DUMP_AMP_COMP_440  = 6;
+static constexpr int16_t CAL_DUMP_AMP_COMP_DUTY = 7;
 
 // --- Live patch shadow -------------------------------------------------------
 // update_parameters() records every persistable param here so a preset can be
@@ -147,6 +151,7 @@ static inline bool preset_param_is_persistable(uint8_t id) {
     case PARAM_SUB_LEVEL:
     case PARAM_OSC3_LEVEL:
     case PARAM_VOICE_MODE:
+    case PARAM_VOICE_ALLOC_MODE:
     case PARAM_UNISON_DETUNE:
     case PARAM_ANALOG_DRIFT_AMOUNT:
     case PARAM_ANALOG_DRIFT_SPEED:

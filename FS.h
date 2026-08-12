@@ -12,6 +12,16 @@ static constexpr uint16_t FSPWBankSize = FSPWDataSize * NUM_OSCILLATORS;
 static constexpr uint16_t FSManualOffsetDataSize = 1;
 static constexpr uint16_t FSManualOffsetBankSize = FSManualOffsetDataSize * NUM_OSCILLATORS;
 
+// One uint16 per oscillator to store ampComp440[] (440 Hz manual anchor).
+static constexpr uint16_t FSAmpComp440DataSize = 2;
+static constexpr uint16_t FSAmpComp440BankSize = FSAmpComp440DataSize * NUM_OSCILLATORS;
+
+// One int16 per oscillator to store ampCompDutyOffset[] (duty target trim,
+// hundredths of a percent of duty).
+static constexpr uint16_t FSAmpCompDutyOffsetDataSize = 2;
+static constexpr uint16_t FSAmpCompDutyOffsetBankSize =
+  FSAmpCompDutyOffsetDataSize * NUM_OSCILLATORS;
+
 static constexpr uint16_t chanLevelVoiceDataSize = FSVoiceDataSize / 4;
 
 // Calibration buffers (FS-local)
@@ -26,12 +36,16 @@ uint8_t PWCenterBankBuffer[FSPWBankSize];
 uint8_t PWHighLimitBankBuffer[FSPWBankSize];
 uint8_t PWLowLimitBankBuffer[FSPWBankSize];
 uint8_t ManualOffsetBankBuffer[FSManualOffsetBankSize];
+uint8_t AmpComp440BankBuffer[FSAmpComp440BankSize];
+uint8_t AmpCompDutyOffsetBankBuffer[FSAmpCompDutyOffsetBankSize];
 
 File fileVoiceTablesFS;
 File filePWCenterFS;
 File filePWHighLimitFS;
 File filePWLowLimitFS;
 File fileManualOffsetFS;
+File fileAmpComp440FS;
+File fileAmpCompDutyOffsetFS;
 
 // Build one oscillator's 22 [freq_x100, RANGE PWM] pairs into out[chanLevelVoiceDataSize].
 void generate_fake_calibration_data(uint8_t osc, uint32_t* out);

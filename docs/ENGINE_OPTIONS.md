@@ -4,8 +4,7 @@ This firmware can run the real-time voice engine in **float** or **fixed-point**
 
 **Complete flag catalog** (engine + noise + profiler + board IO + ADSR/LFO/lib): [`BUILD_FLAGS.md`](BUILD_FLAGS.md).  
 **Live source of truth for engine flags:** the top of [`DCO.ino`](../DCO.ino) before includes — **pitch mode ids**, **board defaults** (including `PITCH_INTERP_MODE`), **overrides**, **guards**, then profiling / board IO.  
-There is **no** `USE_FLOAT_ENGINE` umbrella; voice and amp are separate compile flags. Pitch A/B overrides use `#undef PITCH_INTERP_MODE` then `#define` (default is already set with board defaults).  
-**Historical migration notes:** [`FIXED_POINT_ANALYSIS.md`](FIXED_POINT_ANALYSIS.md) and [`FIXED_POINT_PLAN.md`](FIXED_POINT_PLAN.md) (archive only — not current flag docs).
+There is **no** `USE_FLOAT_ENGINE` umbrella; voice and amp are separate compile flags. Pitch A/B overrides use `#undef PITCH_INTERP_MODE` then `#define` (default is already set with board defaults).
 
 ---
 
@@ -54,7 +53,7 @@ NOTE_RETRIG_MODE_DEFAULT
 |--------|--------|
 | `USE_FLOAT_VOICE_TASK` | Compiles `voice_task_float()`; omits fixed `voice_task_fixed_point()`. Float portamento in `voices.h`. **Default on RP2350**, off RP2040. |
 | `PITCH_INTERP_MODE` | Pitch table path (ids above). Board default: **`FLOAT_FAST` on RP2350**, **`RATIO_Q16` on RP2040**. |
-| `USE_FLOAT_AMP_COMP` | **Compile-time** float amp dual-build: Hz tables, LUT (~42 KB), float precompute + Q8 seed. Not the same as method (see §7). **Default on RP2350**, off RP2040. |
+| `USE_FLOAT_AMP_COMP` | **Compile-time** float amp dual-build: Hz tables, LUT (`NUM_OSCILLATORS × 7001 × 2` bytes; ~42 KB at 3 osc), float precompute + Q8 seed. Not the same as method (see §7). **Default on RP2350**, off RP2040. |
 | `USE_FLOAT_CV_OUTS` | Float VCA/VCF/keytrack/drift/velocity math in `update_CV_outs`. Off → Q15/integer path. **Always-on** (both builds): Q15 mod matrix, `lerp>>12`, `note-60` keytrack, PWM wrap LUT. **Default off** on both MCUs (enable only for A/B). |
 | `AMP_COMP_METHOD_DEFAULT` | Live method when float amp is built: `0 FLOAT_QUAD` / `1 LUT` / `2 FIXED` (runtime cmds 20–22). Board default: **`0 FLOAT_QUAD` on RP2350**, **`2 FIXED` on RP2040**. |
 | `CLKDIV_MODE` | Clkdiv (accuracy order): `0` GOLD (double `llround`); `1` FLOAT (Q24 → float Hz / native Hz on float voice); `2` Q16 (Q16 Hz → 64/32, shipping); `3` Q8 (Q8 32/32+corr); `4` FAST_Q4 (~1 µs). Value `0` is GOLD, not old HP0. Value `1` is FLOAT, not old PRECISE_Q8. Both engines: fixed `clkdiv_live_total_cycles`, float `clkdiv_live_hz_total_cycles`. Board default **Q16** on RP2040, **FLOAT** on RP2350. |
@@ -190,16 +189,16 @@ Flash format is shared: frequencies stored as **`freq × 100`** (`freq_x100`). R
 
 | Mode | After FS load | Precompute | Runtime lookup |
 |------|---------------|------------|----------------|
-| **Fixed** (`!USE_FLOAT_AMP_COMP`) | `ampCompFrequencyArray` in **Q8 Hz** (`FREQ_FRAC_BITS = 8`), `ampCompArray` as `int32_t` | `precomputeCoefficients()` — windows with `T_FRAC = 12`, `invDxWIN_q28` | `get_chan_level_lookup_fast(xQ8, voiceN)` |
+| **Fixed** (`!USE_FLOAT_AMP_COMP`) | `ampCompFrequencyArray` in **Q8 Hz** (`FREQ_FRAC_BITS = 8`), `ampCompArray` as `int32_t` | `precomputeCoefficients()` — `FixedQuadWindow` with `T_FRAC = 12` | `get_chan_level_lookup_fast(xQ8, voiceN)` |
 | **Float** (`USE_FLOAT_AMP_COMP`) | `ampCompFrequencyHz` as `float`, shared `ampCompArray` as `int32_t` | Float quadratic + dense LUT fill; also seed Q8 and run fixed precompute for `FIXED` | Selected by `amp_comp_method` (see below) |
 
-Shared constants: `ampCompTableSize = 22`, `AMP_COMP_MAX_HZ = 7000`, plateau metadata per oscillator, shared `ampCompArray` (`int32_t`).
+Shared constants: `ampCompTableSize = 22`, `AMP_COMP_MAX_HZ = 7000`, plateau metadata per oscillator, shared `ampCompArray` (`int32_t`). Per-window coeffs are `FixedQuadWindow fixedWin[][]` and `FloatQuadCoeffs floatCoeffs[][]` (array-of-structs, same layout on DCO3 and DCO4).
 
 **Domain-max early-out:** float quadratic and FIXED both return `DIV_COUNTER` at `freq >= AMP_COMP_MAX_HZ` / `x >= AMP_COMP_MAX_HZ_Q` (cal sentinel = full RANGE). Prevents a window-scan miss at exact max from falling through to window 0.
 
 **Plateau early-out:** float / LUT use `plateauStartIndex >= 0` plus `plateauStartFreqHz`. FIXED (`get_chan_level_lookup_fast`) does **not** use the shared index after dual-build; validity is `plateauStartFreqQ < AMP_COMP_MAX_HZ_Q` (precompute leaves Q at max when no real plateau was found — same role as `index < 0`).
 
-`precompute_amp_comp_for_engine()` runs the active precompute(s) at startup. Under float amp-comp it also builds `ampCompLut[osc][0..7000]` (~42 KB) from `get_chan_level_float_quad` and keeps fixed Q8 tables for A/B.
+`precompute_amp_comp_for_engine()` runs the active precompute(s) at startup. Under float amp-comp it also builds `ampCompLut[osc][0..7000]` (`NUM_OSCILLATORS × 7001 × 2` bytes; ~42 KB at 3 osc) from `get_chan_level_float_quad` and keeps fixed Q8 tables for A/B.
 
 ### Live methods (`USE_FLOAT_AMP_COMP`)
 
@@ -235,7 +234,7 @@ Speed/accuracy one-shots: `#define AMP_COMP_BENCHMARK` + `RUNNING_AVERAGE`, debu
 | Q8 Hz | `int32_t`, `Hz × 256` | Fixed amp-comp frequency domain; Q8 clkdiv denom (`CLKDIV_Q8` + internal precise_q8 fallback) |
 | Q12 `t` | `T_FRAC = 12` | Fixed amp-comp quadratic parameter |
 | Q16 / Q12 slopes | `slopeQ16` (live RATIO) / `slopeQ12` (Q12 A/B) | Multiplier table interpolation. Cmd 29 may use a private Q20 lerp on native Q16 knots (not a live mode). |
-| Q28 reciprocal | `invDxWIN_q28` | Fixed amp-comp `1/dx` |
+| Q28 reciprocal | `FixedQuadWindow.invDx_q28` | Fixed amp-comp `1/dx` |
 | `freq_x100` | `int32_t` | FS / calibration storage |
 | Table scale | `multiplierTableScale = 10000` | Int pitch tables only (`FLOAT` is unscaled) |
 

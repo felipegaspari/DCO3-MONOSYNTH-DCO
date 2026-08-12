@@ -138,6 +138,47 @@ void init_FS() {
     manualCalibrationOffset[osc] = (int8_t)ManualOffsetBankBuffer[osc];
   }
 
+  // 440 Hz manual anchor values (one uint16 per oscillator, little-endian).
+  if (!LittleFS.exists("AmpComp440")) {
+    fileAmpComp440FS = LittleFS.open("AmpComp440", "w+");
+    // Initialise FS with zeros (0 = never set) so future reads are defined.
+    for (int i = 0; i < FSAmpComp440BankSize; ++i) {
+      AmpComp440BankBuffer[i] = 0;
+    }
+    fileAmpComp440FS.write(AmpComp440BankBuffer, FSAmpComp440BankSize);
+  } else {
+    fileAmpComp440FS = LittleFS.open("AmpComp440", "r");
+    fileAmpComp440FS.read(AmpComp440BankBuffer, FSAmpComp440BankSize);
+  }
+  fileAmpComp440FS.close();
+
+  for (int osc = 0; osc < NUM_OSCILLATORS; ++osc) {
+    uint16_t v;
+    ((uint8_t *)&v)[0] = AmpComp440BankBuffer[osc * 2];
+    ((uint8_t *)&v)[1] = AmpComp440BankBuffer[osc * 2 + 1];
+    ampComp440[osc] = v;
+  }
+
+  // Duty target trims (one int16 per oscillator, little-endian; 0 = none).
+  if (!LittleFS.exists("AmpCompDutyOffset")) {
+    fileAmpCompDutyOffsetFS = LittleFS.open("AmpCompDutyOffset", "w+");
+    for (int i = 0; i < FSAmpCompDutyOffsetBankSize; ++i) {
+      AmpCompDutyOffsetBankBuffer[i] = 0;
+    }
+    fileAmpCompDutyOffsetFS.write(AmpCompDutyOffsetBankBuffer, FSAmpCompDutyOffsetBankSize);
+  } else {
+    fileAmpCompDutyOffsetFS = LittleFS.open("AmpCompDutyOffset", "r");
+    fileAmpCompDutyOffsetFS.read(AmpCompDutyOffsetBankBuffer, FSAmpCompDutyOffsetBankSize);
+  }
+  fileAmpCompDutyOffsetFS.close();
+
+  for (int osc = 0; osc < NUM_OSCILLATORS; ++osc) {
+    int16_t v;
+    ((uint8_t *)&v)[0] = AmpCompDutyOffsetBankBuffer[osc * 2];
+    ((uint8_t *)&v)[1] = AmpCompDutyOffsetBankBuffer[osc * 2 + 1];
+    ampCompDutyOffset[osc] = v;
+  }
+
 #endif
 
   //singleFileDrive.begin("voiceTables", "voicetables.txt");
@@ -219,6 +260,38 @@ void update_FS_ManualCalibrationOffset(byte oscIndex, int8_t value) {
   fileManualOffsetFS.seek(startByteN);
   fileManualOffsetFS.write(&b, FSManualOffsetDataSize);
   fileManualOffsetFS.close();
+}
+
+// Persist one oscillator's 440 Hz manual anchor value (ampComp440[]).
+// Called from apply_param_manual_calibration_store().
+void update_FS_AmpComp440(byte oscIndex, uint16_t value) {
+  if (oscIndex >= NUM_OSCILLATORS) {
+    return;
+  }
+
+  byte *b = (byte *)&value;
+  uint16_t startByteN = oscIndex * FSAmpComp440DataSize;
+
+  fileAmpComp440FS = LittleFS.open("AmpComp440", "r+");
+  fileAmpComp440FS.seek(startByteN);
+  fileAmpComp440FS.write(b, FSAmpComp440DataSize);
+  fileAmpComp440FS.close();
+}
+
+// Persist one oscillator's duty target trim (ampCompDutyOffset[]).
+// Called from apply_param_manual_calibration_store().
+void update_FS_AmpCompDutyOffset(byte oscIndex, int16_t value) {
+  if (oscIndex >= NUM_OSCILLATORS) {
+    return;
+  }
+
+  byte *b = (byte *)&value;
+  uint16_t startByteN = oscIndex * FSAmpCompDutyOffsetDataSize;
+
+  fileAmpCompDutyOffsetFS = LittleFS.open("AmpCompDutyOffset", "r+");
+  fileAmpCompDutyOffsetFS.seek(startByteN);
+  fileAmpCompDutyOffsetFS.write(b, FSAmpCompDutyOffsetDataSize);
+  fileAmpCompDutyOffsetFS.close();
 }
 
 // Archived amp-comp PWM curve (old wrap 10000), used as shape reference for fakes.

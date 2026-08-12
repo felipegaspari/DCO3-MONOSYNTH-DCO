@@ -168,7 +168,7 @@ Steps:
 | 0 | Cross-repo audit; gaps prioritized (system overview, engine flags, file index, comment coverage) |
 | 1 | [`SYSTEM_OVERVIEW.md`](SYSTEM_OVERVIEW.md) — four boards, UART topology, ownership |
 | 2 | Root [`../README.md`](../README.md) — features, pins, dual engine, doc index |
-| 3 | [`ENGINE_OPTIONS.md`](ENGINE_OPTIONS.md); refreshed [`AUTOTUNE.md`](AUTOTUNE.md), [`AUTOTUNE_REFACTORED.md`](AUTOTUNE_REFACTORED.md), [`README_serial_and_params.md`](README_serial_and_params.md); archived [`FIXED_POINT_ANALYSIS.md`](FIXED_POINT_ANALYSIS.md), [`FIXED_POINT_PLAN.md`](FIXED_POINT_PLAN.md) |
+| 3 | [`ENGINE_OPTIONS.md`](ENGINE_OPTIONS.md); refreshed [`AUTOTUNE.md`](AUTOTUNE.md), [`AUTOTUNE_REFACTORED.md`](AUTOTUNE_REFACTORED.md), [`README_serial_and_params.md`](README_serial_and_params.md) |
 | 4 | [`REFERENCE_AI.md`](REFERENCE_AI.md) — semantic map aligned to current code |
 | 5 | [`FILE_INDEX.md`](FILE_INDEX.md) — files, functions, Called from / When |
 | 6 | `//` comments on previously bare functions across `.ino` sources |

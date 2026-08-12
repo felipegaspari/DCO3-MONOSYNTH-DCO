@@ -110,6 +110,9 @@ Pitch interp cmds **28–29** and fixed clkdiv cmds **32–33** (`CLKDIV_MODE` A
 | `ENABLE_SUBOSC_ENGINE2` | **on RP2350**; off / `#error` on RP2040 | Two subs on pio2 SM0/SM1 (`subosc_seg` + DMA, per-sub master select) + boolean combiner on SM3 whose output is what gets mixed; `#undef` to A/B classic pio1 sub | [`subosc.h`](../subosc.h) / [`subosc.ino`](../subosc.ino), [`PIO_OSCILLATORS.md`](PIO_OSCILLATORS.md) §9, [`PINOUT.md`](PINOUT.md) |
 | `RANGE0_PIO_DITHER_TEST` | **on** | All `RANGE_PINS[]` via PIO dither PWM; comment out = HW slice `wrap=DIV_COUNTER` | [`PWM.h`](../PWM.h) / [`PWM.ino`](../PWM.ino), [`autotune.ino`](../autotune.ino), `setup1()` |
 | `NOTE_RETRIG_MODE_DEFAULT` | `0` (EXACT_Y) | Note-on sync retrig default; runtime 26/27 | [`globals.h`](../globals.h) |
+| `AUTOTUNE_AMP_METHOD_DEFAULT` | `1` (FREQ_TRACE) | Amp-comp calibration search used by auto-cal: `0` CLASSIC (per-note range-PWM search), `1` FREQ_TRACE (fixed-PWM frequency bisection from the manual 440 Hz anchor). Runtime 34/35 (panel Calibration tab); reported as `amp_cal=` on the profiler `engine:` line. Fallback in `globals.h` is `0` if this is unset. | [`DCO.ino`](../DCO.ino), [`globals.h`](../globals.h), [`AUTOTUNE.md`](AUTOTUNE.md) |
+| `AUTOTUNE_SEARCH_MODE_DEFAULT` | `1` (INTERP) | How the frequency search closes in once it has a bracket: `0` BISECT, `1` INTERP, `2` GATED. Runtime 37/38/39. Fallback in `globals.h` is also `1`. | [`DCO.ino`](../DCO.ino), [`globals.h`](../globals.h) |
+| `AUTOTUNE_AMP0_MODE_DEFAULT` | `1` (CALC) | Amp-comp-0 endpoint (pair 0): `0` MEASURE (live hunt), `1` CALC (bottom-rung fit). Runtime 40/41. Fallback in `_shared/autotune.h` is `0` if this is unset. | [`DCO.ino`](../DCO.ino), [`_shared/autotune.h`](../_shared/autotune.h) |
 
 ---
 

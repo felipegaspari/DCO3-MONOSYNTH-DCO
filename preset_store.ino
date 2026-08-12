@@ -34,6 +34,8 @@ static const char* preset_bulk_target_name(uint8_t target) {
     case PRESET_BULK_PW_HIGH_LIMIT: return "PWHighLimit";
     case PRESET_BULK_PW_LOW_LIMIT:  return "PWLowLimit";
     case PRESET_BULK_MANUAL_OFFSET: return "ManualOffset";
+    case PRESET_BULK_AMP_COMP_440:  return "AmpComp440";
+    case PRESET_BULK_AMP_COMP_DUTY: return "AmpCompDutyOffset";
     default:                        return "unknown";
   }
 }
@@ -408,7 +410,7 @@ void preset_store_dump(int16_t sel) {
   dump_buffer("preset", sel, presetRecordBuf, PRESET_RECORD_SIZE);
 }
 
-// PARAM_CAL_DUMP: dump calibration LittleFS files as hex (0 / -1 = all five).
+// PARAM_CAL_DUMP: dump calibration LittleFS files as hex (0 / -1 = all six).
 void preset_store_cal_dump(int16_t sel) {
   const bool all = (sel <= CAL_DUMP_ALL);
   if (all || sel == CAL_DUMP_VOICE_TABLES)  dump_fs_file("voiceTables", "voiceTables", FSBankSize);
@@ -416,6 +418,8 @@ void preset_store_cal_dump(int16_t sel) {
   if (all || sel == CAL_DUMP_PW_HIGH_LIMIT) dump_fs_file("PWHighLimit", "PWHighLimit", FSPWBankSize);
   if (all || sel == CAL_DUMP_PW_LOW_LIMIT)  dump_fs_file("PWLowLimit", "PWLowLimit", FSPWBankSize);
   if (all || sel == CAL_DUMP_MANUAL_OFFSET) dump_fs_file("ManualOffset", "ManualOffset", FSManualOffsetBankSize);
+  if (all || sel == CAL_DUMP_AMP_COMP_440)  dump_fs_file("AmpComp440", "AmpComp440", FSAmpComp440BankSize);
+  if (all || sel == CAL_DUMP_AMP_COMP_DUTY) dump_fs_file("AmpCompDutyOffset", "AmpCompDutyOffset", FSAmpCompDutyOffsetBankSize);
 }
 
 // --- bulk restore ('B' chunks + 'C' commit) ------------------------------------
@@ -457,6 +461,8 @@ void preset_bulk_commit(const uint8_t* payload, uint8_t len) {
     case PRESET_BULK_PW_HIGH_LIMIT: want = FSPWBankSize;           calFile = "PWHighLimit"; break;
     case PRESET_BULK_PW_LOW_LIMIT:  want = FSPWBankSize;           calFile = "PWLowLimit"; break;
     case PRESET_BULK_MANUAL_OFFSET: want = FSManualOffsetBankSize; calFile = "ManualOffset"; break;
+    case PRESET_BULK_AMP_COMP_440:  want = FSAmpComp440BankSize;   calFile = "AmpComp440"; break;
+    case PRESET_BULK_AMP_COMP_DUTY: want = FSAmpCompDutyOffsetBankSize; calFile = "AmpCompDutyOffset"; break;
     default:
       Serial.printf("[bulk] err target=%s reason=target\n", tname);
       return;

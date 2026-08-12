@@ -49,7 +49,7 @@ static constexpr uint16_t DIV_COUNTER_PW = 1024;
 
 // Reset pulse width in system clock cycles (Y). Runtime-settable via
 // PARAM_DEBUG_COMMAND 160 with value in [200, 50000] (dco_control Calibration).
-uint32_t pioPulseLength = 3200;
+uint32_t pioPulseLength = 2200;
 
 // --- PIO Program Timing Constants ---
 // `jmp x-- lp` executes X+1 times: it jumps while X is non-zero, then spends one
@@ -105,7 +105,10 @@ volatile uint8_t STACK_VOICES = 1;
 volatile uint8_t voiceMode = 1;
 uint8_t syncMode = 0;
 volatile uint8_t oscSync = 0;
-volatile uint8_t polyMode = 1;
+
+// Voice allocation policy (PARAM_VOICE_ALLOC_MODE) lives on the voiceAlloc
+// instance in voice_alloc_state.h; VoiceAllocMode comes from the shared library.
+// It replaced polyMode, which hard-coded round-robin vs oldest-steal.
 
 volatile uint16_t phaseAlignOSC2 = 0;
 // (removed) phaseAlignScale_Q16; use direct computation at call-site
@@ -281,11 +284,11 @@ uint16_t PW_HIGH_LIMIT[NUM_OSCILLATORS] = { DIV_COUNTER_PW, DIV_COUNTER_PW, DIV_
 uint16_t PW_LOOKUP[3] = { 0, (DIV_COUNTER_PW / 2) - 1, DIV_COUNTER_PW - 1 };
 uint16_t PW_PWM[NUM_OSCILLATORS];
 
+// Gate flag: 1 while the key is down, 0 from note-off onwards. The allocator in
+// voice_alloc_state.h carries the finer distinction it needs on top of this (a
+// released voice is still audible); voice_mark_on/off keep the two in step.
 volatile uint32_t VOICES[NUM_VOICES_TOTAL];
-volatile uint8_t VOICES_LAST[NUM_VOICES_TOTAL];
-volatile uint8_t VOICES_LAST_SEQUENCE[NUM_VOICES_TOTAL] = { 0, 1, 2 };
 volatile uint8_t VOICE_NOTES[NUM_VOICES_TOTAL];
-volatile uint8_t NEXT_VOICE = 0;
 
 uint32_t LED_BLINK_START = 0;
 
@@ -316,7 +319,9 @@ void init_sm(PIO pio, uint sm, uint offset, uint pin);
 void set_frequency(PIO pio, uint sm, float freq);
 float get_freq_from_midi_note(uint8_t note);
 void led_blinking_task();
-uint8_t get_free_voice();
+uint8_t voice_alloc();
+void voice_mark_on(uint8_t voice, uint8_t note, uint8_t velocity);
+void voice_mark_off(uint8_t voice);
 void usb_midi_task();
 void serial_midi_task();
 void note_on(uint8_t note, uint8_t velocity);
