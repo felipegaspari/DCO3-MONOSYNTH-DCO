@@ -836,7 +836,7 @@ MIDI CC control surface: the `MIDI_CC_LINEAR` / `MIDI_CC_EXP_TIME` curves, the `
 - `midi_cc_handle()` — Find the controller in `midiCcMap[]`, scale it into `lo..hi`, apply the exp curve for envelope times, then `midi_cc_apply()`. Unmapped CCs ignored.
   - **Called from:** `handleControlChange()`.
   - **When:** MIDI callback.
-- `midi_cc_apply()` — Dispatch: a `CC_LOCAL_*` target writes ADSR/filter block globals here (`cv_bake_adsr2_to_vcf_scale` / `cv_bake_lfo2_to_vcf_scale` for the matching depth CC; CUTOFF/RESONANCE assign without scale bake). PW (`PARAM_PW_VALUE`) and EnvVCA→VCA (`PARAM_ADSR1_TO_VCA`) and every other mapped ParamId go to `update_parameters()` plus `serial_echo_persistable_param16()`.
+- `midi_cc_apply()` — Dispatch: a `CC_LOCAL_*` target writes ADSR/filter block globals here (`cv_bake_adsr2_to_vcf_scale` / `cv_bake_lfo2_to_vcf_scale` for the matching depth CC; CUTOFF/RESONANCE assign without scale bake), then mirrors the block it touched to Input with the matching `serial_send_*_block_to_mb()` — a block value has no ParamId to echo. PW (`PARAM_PW_VALUE`) and EnvVCA→VCA (`PARAM_ADSR1_TO_VCA`) and every other mapped ParamId go to `update_parameters()` plus `serial_echo_persistable_param16()`.
   - **Called from:** `midi_cc_handle()`.
   - **When:** MIDI callback.
 - `handleProgramChange()` — `preset_store_load(midiPresetBank*128 + program)` when slot < 256 (CC 0/32 latch bank).
@@ -869,7 +869,7 @@ including `serial_frame.h`. Declares block-echo helpers used after preset load.
 - `init_serial()` — Serial1 MIDI baud (RX 1 / TX 0 @ 31250, IRQ/`setPollingMode(false)`), Serial2 2.5M Input link against the Input's `Serial1` (RX 21 from Input TX GP0, TX 20 into Input RX GP1); builds the O(1) command LUT (incl. `'B'`/`'C'`/`'N'`).
   - **Called from:** `setup()`.
   - **When:** Boot Core0.
-- `input_handle_adsr1()` / `input_handle_adsr2()` / `input_handle_adsr3()` — `'a'`/`'b'`/`'c'` LE → EnvVCA / EnvVCF / EnvDCO (`ADSR1_*`) times.
+- `input_handle_adsr1()` / `input_handle_adsr2()` / `input_handle_adsr3()` — `'a'`/`'b'`/`'c'` LE → EnvVCA / EnvVCF / EnvDCO (`ADSR1_*`) times, then `serial_forward_input_block_to_mb()`, which passes a USB-origin block on to Input and drops a panel-origin one.
   - **Called from:** Serial2 / USB parser LUT (`inputSerialLut`).
   - **When:** Serial RX.
 - `input_handle_filter_block()` — `'d'` LE → `CUTOFF`, `RESONANCE`, `ADSR2toVCF`, `LFO2toVCF`, then `cv_bake_adsr2_to_vcf_scale()` + `cv_bake_lfo2_to_vcf_scale()`.
@@ -887,7 +887,7 @@ including `serial_frame.h`. Declares block-echo helpers used after preset load.
 - `input_handle_preset_dir_request()` — `'N'` → `preset_store_send_directory_to_mb()` (256× `'O'` frames on `Serial2`).
   - **Called from:** parser LUT.
   - **When:** Serial RX (Input boot / browse-mode-enter).
-- `serial_send_adsr_vca_block_to_mb()` / `serial_send_adsr_vcf_block_to_mb()` / `serial_send_adsr_dco_block_to_mb()` / `serial_send_filter_block_to_mb()` — Mirror current block globals to Input as `'a'`–`'d'`.
+- `serial_send_adsr_vca_block_to_mb()` / `serial_send_adsr_vcf_block_to_mb()` / `serial_send_adsr_dco_block_to_mb()` / `serial_send_filter_block_to_mb()` — Mirror current block globals to Input as `'a'`–`'d'`, after a preset recall or a block MIDI CC. Input inverts the ADSR times back to fader units and forwards to the Screen.
   - **Called from:** `preset_record_apply()` after load.
   - **When:** Preset recall.
 - `serial_send_preset_loaded_to_mb()` — `'L'` `[slot]` to Input.

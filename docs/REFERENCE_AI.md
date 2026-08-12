@@ -289,7 +289,7 @@ Related docs:
     - `handlePitchBend()` updates `midi_pitch_bend` in globals.
   - **MIDI CC control surface** (`midi_cc.h` + the generated `midi_cc_map.h`, chart in `docs/MIDI_CC_MAP.md`):
     - `midi_cc_handle()` finds the controller in `midiCcMap[]`, scales it as `lo + ((hi - lo) * cc + 63) / 127`, and runs envelope attack/decay/release through `linearToExponential(v, 50, 25000)` so a CC lands in the same exp domain the `'a'`-`'c'` block frames carry.
-    - `midi_cc_apply()` dispatches: targets at or above `CC_LOCAL_FIRST` (224) are the 1 ms ADSR/filter block values (`'a'`–`'d'`) that have no `ParamId`, so they are written to their globals here exactly as `input_handle_*()` writes them; PW (`PARAM_PW_VALUE`) and EnvVCA→VCA (`PARAM_ADSR1_TO_VCA`) and everything else go to `update_parameters()`.
+    - `midi_cc_apply()` dispatches: targets at or above `CC_LOCAL_FIRST` (224) are the 1 ms ADSR/filter block values (`'a'`–`'d'`) that have no `ParamId`, so they are written to their globals here exactly as `input_handle_*()` writes them and the touched block is then mirrored to Input (the codes are grouped per block, so one range test after the switch picks the sender); PW (`PARAM_PW_VALUE`) and EnvVCA→VCA (`PARAM_ADSR1_TO_VCA`) and everything else go to `update_parameters()`.
     - The map, the chart and the Open Stage Control session in `tools/panels/` are all generated from `tools/dco_control/params.py` by `gen_midi_map.py`, which also verifies that each mapped `ParamId` is routed by `paramTable[]` and each `CC_LOCAL_*` has a case in `midi_cc_apply()`.
   - `note_on()` / `note_off()`:
     - Voice allocation by `voiceMode` / `polyMode`. Note edges stay on the board (`noteStart[]` / `noteEnd[]` → EnvDCO/EnvVCA/EnvVCF on Core1); nothing is sent over serial for notes.
@@ -321,7 +321,7 @@ Related docs:
   - Outgoing helper:
     - `serialSendParam32()` – slim `'x'` via `serial_frame_write` (gap 154, cal offsets 155) out on Serial2 TX 20, received by the Input on its `Serial1`. Payload 5 = `[id][u32 LE]`. Drops if `availableForWrite() < 1`.
     - `serialSendParam16()` / `serial_echo_persistable_param16()` – slim `'p'` `[id][i16 LE]` for persistable USB/MIDI applies (`preset_param_is_persistable`). Input stores locals only (ADSR3→PWM wire − 512) and forwards the same `'p'` to Screen toasts.
-    - `serial_send_adsr_*_block_to_mb()` / `serial_send_filter_block_to_mb()` – mirror block globals to Input after a preset load.
+    - `serial_send_adsr_*_block_to_mb()` / `serial_send_filter_block_to_mb()` – mirror block globals to Input after a preset load or a block MIDI CC. A USB-origin `'a'`–`'d'` is mirrored by `serial_forward_input_block_to_mb()` from inside the handler instead, re-sending the frame it just parsed. Input inverts the ADSR times back to fader units, forwards `'a'`/`'b'` to the Screen, and sends the filter fields as UI ids 191-194.
   - `serial_panel_task()` / `serial_usb_task()` are the parser pumps, called from `loop()` on `timer1msFlag`. USB/DIN MIDI `.read()` still runs every iteration (`turnThruOff`).
   - Shared headers: `serial_input_protocol.h`, `serial_frame.h`, `serial_param_protocol.h`, `serial_parser.h`. How-to: [`README_serial_and_params.md`](README_serial_and_params.md).
 

@@ -31,7 +31,11 @@ block. The former `'e'`/`'f'` commands are now `'p'` ids 222 and 210.
 ## Board-specific frame handling
 
 - `'a'`/`'b'`/`'c'`/`'d'` write the ADSR and filter block globals directly and
-  set dirty flags — they do **not** go through `update_parameters()`.
+  set dirty flags — they do **not** go through `update_parameters()`. A block
+  that arrived over USB is mirrored back out to Input
+  (`serial_forward_input_block_to_mb`, gated on `g_param_ingress`) so the panel
+  faders and pots and the Screen follow a host edit; a panel-origin block is not,
+  or it would echo to its own sender.
 - `'p'` is both panel ingress and the DCO→Input persistable mirror (the mirror is
   sent for USB/MIDI edits only, never for panel ingress).
 - `'q'` also stages the name used by `PARAM_PRESET_SAVE`.
@@ -41,8 +45,10 @@ block. The former `'e'`/`'f'` commands are now `'p'` ids 222 and 210.
 `midi_cc_apply()` writes the ADSR/filter block globals directly (`CC_LOCAL_*`).
 Everything else, including `PARAM_PW_VALUE` and `PARAM_ADSR1_TO_VCA`, goes
 through `update_parameters()`. Persistable ParamId CCs also call
-`serial_echo_persistable_param16()` so a saved preset matches what you hear. The
-`'a'`–`'d'` domains are not mirrored. MIDI Program Change recalls a preset slot
+`serial_echo_persistable_param16()` so a saved preset matches what you hear. A
+block CC has no ParamId to echo, so `midi_cc_apply()` instead sends the whole
+block it touched (`serial_send_adsr_*_block_to_mb` / `serial_send_filter_block_to_mb`)
+the way a preset recall does. MIDI Program Change recalls a preset slot
 (`midiPresetBank * 128 + program`; CC 0/32 select the bank).
 
 ## Preset / calibration ParamIds (DCO-local)
@@ -52,7 +58,7 @@ through `update_parameters()`. Persistable ParamId CCs also call
 | 170 | `PARAM_PRESET_SAVE` | slot 0..255 — save live state to LittleFS |
 | 171 | `PARAM_PRESET_LOAD` | slot 0..255 — recall (same as MIDI PC + bank) |
 | 172 | `PARAM_PRESET_DUMP` | −1 = `[pdir]` listing; 0..255 = slot record hex dump |
-| 173 | `PARAM_CAL_DUMP` | 0/−1 = all cal tables; 1..5 = one table |
+| 173 | `PARAM_CAL_DUMP` | 0/−1 = all cal tables; 1..6 = one table |
 
 These are deliberately off the MIDI CC map (filesystem access and long dumps).
 See [`PRESET_STORE.md`](PRESET_STORE.md) and the host tool at

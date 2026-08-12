@@ -141,7 +141,20 @@ void midi_cc_apply(uint8_t target, int16_t value) {
     default:
       update_parameters((uint16_t)target, value);
       serial_echo_persistable_param16(target, value);
-      break;
+      return;
+  }
+
+  // A block CC has no ParamId to echo, so mirror the whole block the way a
+  // preset recall does; otherwise the panel and the Screen keep showing the
+  // values they last sent. The CC_LOCAL_* codes are grouped per block.
+  if (target <= CC_LOCAL_ADSR_VCA_RELEASE) {
+    serial_send_adsr_vca_block_to_mb();
+  } else if (target <= CC_LOCAL_ADSR_VCF_RELEASE) {
+    serial_send_adsr_vcf_block_to_mb();
+  } else if (target <= CC_LOCAL_ADSR_DCO_RELEASE) {
+    serial_send_adsr_dco_block_to_mb();
+  } else {
+    serial_send_filter_block_to_mb();
   }
 }
 

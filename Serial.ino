@@ -1,7 +1,7 @@
 // Serial1 = MIDI DIN @ 31250; Serial2 = Input hub @ 2.5M (inner panel protocol).
 // Screen has no DCO port: gap 'x' rides the Input link and Input relays it.
 
-// Input / USB share one LUT. Tag the drain so USB 'p'/'a'/'b'/'d' can mirror to
+// Input / USB share one LUT. Tag the drain so USB 'p'/'a'-'d' can mirror to
 // Input without echoing the panel's own stream back onto the Input link.
 enum ParamIngress : uint8_t {
   PARAM_SRC_INPUT = 0,
@@ -123,6 +123,7 @@ static void input_handle_adsr3(char, const uint8_t* payload, uint8_t len) {
   if (v != ADSR1_release) { ADSR1_release = v; dirty |= ADSR_DIRTY_DCO_R; }
 
   if (dirty) mark_adsr_params_dirty(dirty);
+  serial_forward_input_block_to_mb(INPUT_CMD_ADSR3_BLOCK, payload, len);
 }
 
 static void input_handle_filter_block(char, const uint8_t* payload, uint8_t len) {
