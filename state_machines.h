@@ -106,8 +106,13 @@ void pio_period_probe(uint8_t osc, uint32_t clk_div);
 void pio_solve_period_model(uint32_t clk_div_a, double measured_hz_a,
                             uint32_t clk_div_b, double measured_hz_b, uint32_t y);
 
+// Rebuild the sync topology (voices.ino) — core 1 only. Declared here because the
+// deferred queue and the manual-cal branch of loop1() both call it.
+void setSyncMode();
+
 // PIO mutations requested from core 0 (serial/MIDI) and applied on core 1 before voice_task.
 void pio_defer_request_sync_mode();
+void pio_defer_request_cal_restore();
 void pio_defer_request_reset_pulse_all();
 void pio_defer_request_subosc(uint8_t divide);
 #ifdef ENABLE_SUBOSC_ENGINE2

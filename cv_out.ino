@@ -283,16 +283,23 @@ void update_CV_outs_manual_calibration() {
   static constexpr uint16_t CAL_VCA_COMPARE = 150;
   static constexpr uint16_t CAL_SQR_ON = 50;
   static constexpr uint16_t CAL_SQR_MUTED = 4095;
+  // The SQR levels are inverted (lin_to_log_128[] — 4095 is silent), the sub CV
+  // is direct (SubLevelVal * 32), so its mute is the other end of the scale.
+  static constexpr uint16_t CAL_SUB_MUTED = 0;
 
   byte stage = (byte)manualCalibrationStage;
-  if (stage > 2) stage = 2;
+  uint8_t osc = cal_stage_to_osc(stage);
+  if (osc > 2) osc = 2;
 
   waveSelector_manual_calibration(stage);
 
-  OSC1Level = (stage == 0) ? CAL_SQR_ON : CAL_SQR_MUTED;
-  OSC2Level = (stage == 1) ? CAL_SQR_ON : CAL_SQR_MUTED;
-  OSC3Level = (stage == 2) ? CAL_SQR_ON : CAL_SQR_MUTED;
-  SubLevel = CAL_SQR_MUTED;
+  // Saw: mute every pulse DAC so the analog square does not mix with saw.
+  // Pulse and 440: only the calibrated oscillator's SQR DAC is open.
+  const bool square = cal_stage_is_square(stage);
+  OSC1Level = (osc == 0 && square) ? CAL_SQR_ON : CAL_SQR_MUTED;
+  OSC2Level = (osc == 1 && square) ? CAL_SQR_ON : CAL_SQR_MUTED;
+  OSC3Level = (osc == 2 && square) ? CAL_SQR_ON : CAL_SQR_MUTED;
+  SubLevel = CAL_SUB_MUTED;
 #ifdef ENABLE_CV_OUTS
   write_level_pwm();
 #endif

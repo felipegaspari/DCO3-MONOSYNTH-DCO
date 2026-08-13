@@ -514,6 +514,16 @@ slave.
 In soft-sync mode the master leaves its sideset on **its own** pin — otherwise both mechanisms
 would fire at once.
 
+Either flavour makes the slave depend on a *running* master, so **manual calibration forces a
+neutral topology**: it solos one oscillator by stopping every other state machine, and a stopped
+master leaves its slave's reset pin dead (hard sync) or its polled pin static (soft sync), so the
+soloed oscillator would fall silent. `apply_param_manual_calibration_flag()` saves `syncMode` /
+`softSyncChunks`, zeroes them, and asks core 1 to rebuild through `calSyncNeutralRequested`
+(`loop1()`'s manual-cal branch, since that branch never reaches `pio_defer_service()`); exit
+restores the pair before `restore_voice_engine_after_calibration()` calls `start_voice_sms()`
+again. A `PARAM_SYNC_MODE` / `PARAM_SOFT_SYNC` write arriving mid-walk is booked for the exit
+instead of applied.
+
 ### 7.4 Soft-sync thresholds
 
 Polling only trailing chunks means master edges arriving earlier in the slave's cycle are

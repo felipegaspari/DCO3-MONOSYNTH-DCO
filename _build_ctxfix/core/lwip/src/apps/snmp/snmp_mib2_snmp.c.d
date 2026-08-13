@@ -1,0 +1,18 @@
+/home/felipe/Documentos/DCO3-MONOSYNTH/DCO/_build_ctxfix/core/lwip/src/apps/snmp/snmp_mib2_snmp.c.o: \
+ /home/felipe/.arduino15/packages/rp2040/hardware/rp2040/6.0.0/cores/rp2040/lwip/src/apps/snmp/snmp_mib2_snmp.c \
+ /home/felipe/.arduino15/packages/rp2040/hardware/rp2040/6.0.0/cores/rp2040/lwip/src/apps/snmp/../../../../../../pico-sdk/lib/lwip/src/apps/snmp/snmp_mib2_snmp.c \
+ /home/felipe/.arduino15/packages/rp2040/hardware/rp2040/6.0.0//pico-sdk/lib/lwip/src/include/lwip/snmp.h \
+ /home/felipe/.arduino15/packages/rp2040/hardware/rp2040/6.0.0//pico-sdk/lib/lwip/src/include/lwip/opt.h \
+ /home/felipe/.arduino15/packages/rp2040/hardware/rp2040/6.0.0//pico-sdk/lib/lwip/src/include/lwip/debug.h \
+ /home/felipe/.arduino15/packages/rp2040/hardware/rp2040/6.0.0//pico-sdk/lib/lwip/src/include/lwip/arch.h \
+ /home/felipe/.arduino15/packages/rp2040/hardware/rp2040/6.0.0//pico-sdk/src/rp2_common/pico_lwip/include/arch/cc.h \
+ /home/felipe/.arduino15/packages/rp2040/hardware/rp2040/6.0.0//pico-sdk/lib/lwip/src/include/lwip/ip_addr.h \
+ /home/felipe/.arduino15/packages/rp2040/hardware/rp2040/6.0.0//pico-sdk/lib/lwip/src/include/lwip/def.h \
+ /home/felipe/.arduino15/packages/rp2040/hardware/rp2040/6.0.0//pico-sdk/lib/lwip/src/include/lwip/ip4_addr.h \
+ /home/felipe/.arduino15/packages/rp2040/hardware/rp2040/6.0.0//pico-sdk/lib/lwip/src/include/lwip/ip6_addr.h \
+ /home/felipe/.arduino15/packages/rp2040/hardware/rp2040/6.0.0//pico-sdk/lib/lwip/src/include/lwip/def.h \
+ /home/felipe/.arduino15/packages/rp2040/hardware/rp2040/6.0.0//pico-sdk/lib/lwip/src/include/lwip/apps/snmp.h \
+ /home/felipe/.arduino15/packages/rp2040/hardware/rp2040/6.0.0//pico-sdk/lib/lwip/src/include/lwip/apps/snmp_opts.h \
+ /home/felipe/.arduino15/packages/rp2040/hardware/rp2040/6.0.0//pico-sdk/lib/lwip/src/include/lwip/apps/snmp_core.h \
+ /home/felipe/.arduino15/packages/rp2040/hardware/rp2040/6.0.0//pico-sdk/lib/lwip/src/include/lwip/apps/snmp_mib2.h \
+ /home/felipe/.arduino15/packages/rp2040/hardware/rp2040/6.0.0//pico-sdk/lib/lwip/src/include/lwip/apps/snmp_scalar.h

@@ -334,7 +334,7 @@ bool preset_store_load(uint8_t slot) {
 // frames. Opens each chunk once and seeks for the 4 name heads — 64 opens for
 // 256 slots. Blank (all-zero) name = unused slot.
 void preset_store_send_directory_to_mb() {
-  if (Serial2.availableForWrite() < 1) return;  // no Input board on this link
+  if (!serial2_dma_tx_ready()) return;  // no Input board on this link
 
   char fname[8];
   uint8_t entry[1 + PRESET_NAME_LEN];
@@ -363,7 +363,9 @@ void preset_store_send_directory_to_mb() {
         }
       }
 
-      serial_frame_write(Serial2, INPUT_CMD_PRESET_DIR_ENTRY, entry, sizeof(entry));
+      while (!serial2_dma_tx_ready()) {
+      }
+      serial_frame_write(Serial2Dma, INPUT_CMD_PRESET_DIR_ENTRY, entry, sizeof(entry));
     }
     if (openOk) f.close();
   }
@@ -410,7 +412,7 @@ void preset_store_dump(int16_t sel) {
   dump_buffer("preset", sel, presetRecordBuf, PRESET_RECORD_SIZE);
 }
 
-// PARAM_CAL_DUMP: dump calibration LittleFS files as hex (0 / -1 = all six).
+// PARAM_CAL_DUMP: dump calibration LittleFS files as hex (0 / -1 = all seven).
 void preset_store_cal_dump(int16_t sel) {
   const bool all = (sel <= CAL_DUMP_ALL);
   if (all || sel == CAL_DUMP_VOICE_TABLES)  dump_fs_file("voiceTables", "voiceTables", FSBankSize);

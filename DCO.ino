@@ -227,7 +227,11 @@
 // switch (e.g. DG411: IN low = on). PIO still uses logical 1 = assert / discharge;
 // GPIO OUTOVER+INOVER invert the pad so soft sync jmp_pin and sub-osc wait keep
 // working. Leave commented for active-high / direct FET discharge. See PIO_OSCILLATORS.md.
+// DCO3 (DG411) defines this; DCO4 (active-high / FET) does not.
+#include "project_config.h"
+#if PROJECT_INSTRUMENT == 3
 #define ENABLE_PIO_RESET_INVERT
+#endif
 
 // ENABLE_SUBOSC_ENGINE2 — two sub-oscillators on pio2, each following whichever main
 // oscillator it is pointed at: two SMs share the subosc_seg program (edge-locked divide plus
@@ -302,7 +306,7 @@
 
 // ****************************************************************************************** //
 
-// Core 0 boot: USB, UART serial, MIDI handlers, LFOs, board fix pins, calibration input pin.
+// Core 0 boot: USB, UART serial, MIDI handlers, LFOs, calibration input pin.
 void setup() {
   sys_clock_hz_refresh();  // Arduino already set clk_sys; cache real Hz for clkdiv
   // EEPROM.begin(512);
@@ -319,12 +323,6 @@ void setup() {
 
   // init_tuner();
   // init_tuning_tables();
-
-  pinMode(23, OUTPUT);
-  digitalWrite(23, HIGH);
-
-  pinMode(24, OUTPUT);  // Fix pin on DCO BOARD
-  digitalWrite(24, HIGH);
 
   pinMode(DCO_calibration_pin, INPUT);
 
@@ -459,11 +457,17 @@ void __not_in_flash_func(loop1)() {
 
   if (calibrationFlag == true) {
     if (manualCalibrationFlag == true) {
-      // Keep currentDCO in sync so [GAP_MEASURE]/[GAP_TIMEOUT] logs match the soloed osc.
-      currentDCO = manualCalibrationStage;
-      if (currentDCO >= NUM_OSCILLATORS) {
-        currentDCO = NUM_OSCILLATORS - 1;
+      // voice_task_autotune() solos by stopping every other SM, so the pair must
+      // be unsynced first or the soloed oscillator loses its RESET pin to a
+      // stopped partner. Core 0 only books it (autotune.h); the rebuild is PIO
+      // work and this branch never reaches pio_defer_service().
+      if (calSyncNeutralRequested) {
+        calSyncNeutralRequested = false;
+        setSyncMode();
       }
+
+      // Keep currentDCO in sync so [GAP_MEASURE]/[GAP_TIMEOUT] logs match the soloed osc.
+      currentDCO = cal_manual_osc();
 
       if (manualCalibrationStep == 1) {
         // Step 2: dial in the per-osc amp-comp value at 440 Hz (A4). The
@@ -498,6 +502,13 @@ void __not_in_flash_func(loop1)() {
       // difference so the screen can display live feedback for the user.
       DCO_calibration_debug();
       //Serial.println((String) "PW value: " + (PW[0] / 4));
+
+      // Runs between two manual passes, so the oscillator it measures is
+      // already soloed and the next pass restores the substage's PW.
+      if (pwCvProbeRequested) {
+        pwCvProbeRequested = false;
+        run_pw_cv_probe();
+      }
 
     } else {
       DCO_calibration();

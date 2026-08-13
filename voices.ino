@@ -2050,10 +2050,7 @@ void voice_task_autotune(uint8_t taskAutotuneVoiceMode, uint16_t calibrationValu
 
   if (manualCalibrationFlag == true) {  // One Ocillator at a time to get correct gap
 
-    uint8_t currentCalibrationOscillator = (uint8_t)manualCalibrationStage;
-    if (currentCalibrationOscillator >= NUM_OSCILLATORS) {
-      currentCalibrationOscillator = NUM_OSCILLATORS - 1;
-    }
+    uint8_t currentCalibrationOscillator = cal_manual_osc();
 
     // ALL AT ONCE
     for (int i = 0; i < NUM_OSCILLATORS; i++) {
@@ -2061,12 +2058,15 @@ void voice_task_autotune(uint8_t taskAutotuneVoiceMode, uint16_t calibrationValu
       uint8_t sm1N = VOICE_TO_SM[i];
 
       if (i != currentCalibrationOscillator) {
-        uint32_t silence_clk_div1 = 200;
-
-        pio_sm_put(pioN, sm1N, silence_clk_div1);
+        // Parked at a clk_div the SM keeps toggling RESET; only a stopped one is
+        // really silent. pio_sm_exec runs on a stopped SM, so the pull still
+        // drains what was put (same idiom as osc_load_period_stopped).
+        pio_sm_set_enabled(pioN, sm1N, false);
+        pio_sm_put(pioN, sm1N, 0);
         pio_sm_exec(pioN, sm1N, pio_encode_pull(false, false));
         write_range_pwm((uint8_t)i, 0);
       } else {
+        pio_sm_set_enabled(pioN, sm1N, true);  // an earlier stage may have stopped it
 
         uint32_t clk_div1 = autotune_total_cycles
                               ? pio_clk_div_for_y(autotune_total_cycles, osc_last_y[i],
@@ -2079,18 +2079,28 @@ void voice_task_autotune(uint8_t taskAutotuneVoiceMode, uint16_t calibrationValu
 
         write_range_pwm((uint8_t)i, calibrationValue);
 
-        // NOTE (frame of reference): manual calibration drives the PW channel
-        // at 0 while every auto-cal probe runs at PW_CENTER[0] (the value the
-        // PW stage calibrated to 50% duty). Both stages ask the user/search
-        // for "50% duty", but they read it at two different comparator
-        // thresholds, so a value dialled by hand (ampComp440) can be
-        // systematically offset from what the trace measures. FREQ_TRACE
-        // therefore treats the stored 440 Hz value as a seed and re-measures
-        // it ([FREQ_TRACE_ANCHOR]). Left as is on purpose: changing manual
-        // mode would invalidate the existing trimpot procedure.
-        pwm_set_chan_level(PW_PWM_SLICES[0], pwm_gpio_to_channel(PW_PINS[0]), 0);
-
         //Serial.println((String) "currentCalibrationOscillator: " + (int)currentCalibrationOscillator + (String) "   calibrationValue: " + (int)calibrationValue);
+      }
+    }
+
+    // The pulse is the one wave with no analog switch, so its PW CV is its
+    // on/off and every channel has to be written: one left at the value the
+    // panel gave it keeps that voice sounding through the whole walk. The
+    // calibrated voice opens only on the pulse / 440 substages, at the same
+    // PW center every FREQ_TRACE anchor probe measures at, so an ampComp440
+    // dialled by ear is not offset from what the trace later finds.
+    {
+      const uint8_t pwCh = cal_pw_channel(currentCalibrationOscillator);
+      const bool wantPulse = cal_stage_is_square((uint8_t)manualCalibrationStage);
+      for (uint8_t ch = 0; ch < NUM_PW_CHANNELS; ch++) {
+        if (PW_PINS[ch] == PW_PIN_UNASSIGNED) continue;
+        uint16_t pwLevel = 0;
+        if (wantPulse && ch == pwCh) {
+          pwLevel = (PW_CENTER[ch] != 0) ? PW_CENTER[ch]
+                                         : (uint16_t)(DIV_COUNTER_PW / 2);
+        }
+        pwm_set_chan_level(PW_PWM_SLICES[ch],
+                           pwm_gpio_to_channel(PW_PINS[ch]), pwLevel);
       }
     }
   } else {

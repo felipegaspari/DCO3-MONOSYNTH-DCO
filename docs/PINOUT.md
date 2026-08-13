@@ -2,7 +2,7 @@
 
 **Status:** Phase 0 complete (provisional). **Not frozen for PCB fab** until reviewed against the physical monosynth carrier.
 
-**Platform assumption:** RP2350A (GPIO0–29 class) plus optional helper **RP2040**, or a solo **RP2350B**. Stock Pico 2 header only exposes **26** GPIOs and may omit some pins used below (notably **GPIO29**). Dual-MCU architecture: [`DUAL_MCU.md`](DUAL_MCU.md).
+**Platform assumption:** RP2350A (GPIO0–29 class) plus optional helper **RP2040**, or a solo **RP2350B**. Stock Pico 2 header only exposes **26** GPIOs and may omit some pins used below (notably **GPIO29**). MCU module is `DCO_MCU_BOARD` in [`project_config.h`](../../project_config.h) (this tree defaults to **Pico 2**). Dual-MCU architecture: [`DUAL_MCU.md`](DUAL_MCU.md).
 
 Related: [`MAINBOARD_ABSORPTION.md`](MAINBOARD_ABSORPTION.md), [`PIO_OSCILLATORS.md`](PIO_OSCILLATORS.md) §9.
 Live RESET/RANGE/PW/cal/sub pins are in [`globals.h`](../globals.h). Hub/CV pins are behind
@@ -40,7 +40,7 @@ The DCO's pins on the Input link are fixed at GP20 TX / GP21 RX, and both wires 
 
 ## Live DCO outs (unchanged until PCB freeze)
 
-From [`globals.h`](../globals.h) today:
+From [`globals.h`](../globals.h). OSC1–3 RESET/RANGE are DCO4 global OSC 3/4/5 (indices 2–4 of the 8-osc map). Osc 0/1 differ WeAct vs Pico (GPIO 29 vs 28/26); that slice is unused here, so these three pins are identical on `DCO_MCU_WEACT_RP2040`, `DCO_MCU_PICO`, and `DCO_MCU_PICO2` (this tree’s default). Switch the module in [`project_config.h`](../../project_config.h).
 
 | Function | GPIO | Block | PWM slice (`(gpio>>1)&7` for gpio &lt; 32) | Channel |
 |----------|------|-------|---------------------------------------------|---------|
@@ -55,7 +55,9 @@ From [`globals.h`](../globals.h) today:
 | OSC3 RANGE | **14** | PIO0 SM3 or PWM | 7 | A |
 | PW (voice 0) | 3 | PWM | 1 | B |
 | Cal sense | **6** (was 10; A/B header spare) | GPIO in | — | — |
-| Board fix rails | 23, 24 | GPIO out HIGH | — | — |
+| WeAct KEY | **23** | `USER_KEY_PIN`: hold = MIDI 69 / A440 | — | — |
+| Analog board-fix | **24** | WeAct `BOARD_FIX_PIN` OUT HIGH. Pico/Pico 2: VBUS sense, not driven | — | — |
+| SMPS Power Save | **23** | Pico/Pico 2 `SMPS_PS_PIN` OUT HIGH (RT6150 PWM) | — | — |
 
 **All three oscillators must stay on PIO0.** A GPIO's function select names exactly one PIO
 block, so oscillators split across blocks cannot share a reset pin — the second
@@ -138,7 +140,8 @@ Full detail on the programs, the period model, sync modes and phase align:
 | 18 | OSC2 RESET **and** OSC2 level PWM (slice 1 A w/ PW) — same dual-role caution |
 | 19 | OSC1 RESET |
 | 20,21 | HW UART Input |
-| 23,24 | Board fix |
+| 23 | WeAct: onboard KEY (A440). Pico/Pico 2: SMPS PS, OUT HIGH |
+| 24 | WeAct: analog board-fix OUT HIGH. Pico/Pico 2: VBUS sense, not driven |
 | 25 | Pico LED (not on header) |
 | 26 | Dist Mix / Sub level when CV/aux flags on |
 | 32,33 | OSC3 / Sub level (solo RP2350B provisional) |

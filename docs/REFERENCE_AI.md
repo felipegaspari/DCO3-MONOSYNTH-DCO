@@ -46,7 +46,7 @@ Related docs:
     - With `ENABLE_SUBOSC_ENGINE2` (RP2350 default): `SUBOSC_COUNT = 2`, `subOscMaster[]` / `subOscDivides[]` / `subOscPhaseDeg[]` / `subOscWidth[]`, `subOscLogicOp` (0..8), `subosc_mod_phase` / `subosc_mod_pw` (sub 2 only); `SUBOSC_PINS = {8,9}`, `SUBOSC_LOGIC_PIN = 10`.
     - Fixed‑point pitch‑bend multipliers (`pitchBendMultiplier_q24`); LFO pitch mods live in `LFO.h` (`lfo1_pitch_mod_q24[]`, `lfo2_pitch_mod_q24[]`).
     - Global voice arrays (`VOICE_NOTES`, `VOICES`, `note_on_flag`, shared `PW[0]`, etc.).
-    - Hardware pin mappings: `RESET_PINS = {19,18,15}`, `RANGE_PINS = {17,16,14}`, `PW_PINS[0] = 3`, classic `SUBOSC_PIN = 8`.
+    - Hardware pin mappings from `DCO_MCU_BOARD` in `project_config.h` (default Pico 2): `RESET_PINS = {19,18,15}`, `RANGE_PINS = {17,16,14}` (DCO4 osc 3/4/5 — identical on WeAct, Pico, and Pico 2), `PW_PINS[0] = 3`, classic `SUBOSC_PIN = 8`. WeAct KEY GP23 = A440; Pico/Pico 2 `SMPS_PS_PIN` 23 HIGH.
     - `VOICE_TO_PIO = {0,0,0}` — **all three oscillators share pio0.** A GPIO's function select names exactly one PIO block, so oscillators on separate blocks cannot share a reset pin: `pio_gpio_init()` on the second block silently steals the pin from the first, which is what broke hard sync when the layout was `{0,1,2}`. `pio_topology_report()` asserts this.
     - `VOICE_TO_SM` is **mutable**, rewritten by `assign_sm_mapping()`: the slave takes the lower SM index because when two SMs write a pin on the same cycle the higher-numbered one wins, so the master must outrank its slave or it drops the occasional sync edge.
     - `DCO_calibration_pin = 6` (temporary A/B on Pico header; was 10; GP25 aborted); `ENABLE_FS_CALIBRATION`.
@@ -103,7 +103,7 @@ Related docs:
     - Voice allocation helpers (scaffolding; with `NUM_VOICES = 1` they collapse to mono):
       - `voice_alloc()`, `voice_mark_on()` and `voice_mark_off()` adapt the shared allocator in `_shared/voice_alloc.h` (see `note_on()` below).
       - `setVoiceMode()` configures `NUM_VOICES` / `STACK_VOICES` and resyncs the allocator to the gates.
-      - `setSyncMode()` calls `assign_sm_mapping()` + `start_voice_sms()` to rebuild the whole sync topology (OSC1↔OSC2; OSC3 free-running), then forces a re-trigger. It no longer pokes sideset pins in place or calls `pio_sm_restart()` — that cleared the shift counters but left PC/X/Y, which could strand an SM mid-loop with a stale X for one glitched period.
+      - `setSyncMode()` calls `assign_sm_mapping()` + `start_voice_sms()` to rebuild the whole sync topology (OSC1↔OSC2; OSC3 free-running), then forces a re-trigger. It no longer pokes sideset pins in place or calls `pio_sm_restart()` — that cleared the shift counters but left PC/X/Y, which could strand an SM mid-loop with a stale X for one glitched period. Declared in `state_machines.h`; **manual calibration runs it with `syncMode` forced to 0**, because the cal solo stops the partner oscillator and a synced slave cannot reset itself without a running master ([`PIO_OSCILLATORS.md`](PIO_OSCILLATORS.md) §7.3).
     - Amplitude compensation helpers:
       - `get_chan_level_lookup_fast()` – optimized fixed‑point quadratic interpolation per DCO (always built; live FIXED method under float engine), using cached window indices and Q28 reciprocals.
       - `get_chan_level_float_quad()` – cached-walk float quadratic (live FLOAT_QUAD; also LUT fill / accuracy gold); `get_chan_level_lut()` – dense nearest-Hz LUT.
@@ -226,9 +226,9 @@ Related docs:
       - For each oscillator, `restart_DCO_calibration()` then `calibrate_DCO()` or `calibrate_DCO_freq_trace()` to populate `calibrationData[]`.
       - Persists data using `update_FS_voice()` and refreshes amp‑comp tables with `init_FS()` and `precompute_amp_comp_for_engine()`.
   - `restart_DCO_calibration()`:
-    - Reset the note schedule and `calibrationData` header between oscillators; re‑arms RANGE pin/PIO.
+    - Reset the note schedule and `calibrationData` header between oscillators; re‑arms RANGE pin/PIO; drives this oscillator's PW channel at its stored `PW_CENTER` and the rest at 0 (`apply_pw_center_solo()`), which is what the amp‑comp stage measures at since it never programs PW itself.
   - `find_PW_center()` / `find_PW_limit_v2()`:
-    - PW target-duty searches built on the phased `find_PW_for_target_duty()` (coarse scan → bisection or fine scan → lock‑in) and `search_PW_limit_from_center()`; all probes go through `set_pw_and_measure()`.
+    - PW target-duty searches built on the phased `find_PW_for_target_duty()` (coarse scan → bisection or fine scan → lock‑in) and `search_PW_limit_from_center()`; all probes go through `set_pw_and_measure()` on `cal_pw_channel(currentDCO)`.
     - Persist PW calibration values into LittleFS via `update_FS_PWCenter()` / `update_FS_PW_Low_Limit()` / `update_FS_PW_High_Limit()`.
   - `find_gap()` / `DCO_calibration_debug()`:
     - Edge‑timing measurement core (state fully local) that measures the DCO duty cycle at the calibration pin; consumed via the `measure_gap()` wrapper.
@@ -249,21 +249,41 @@ Related docs:
 
 ## 6. Storage & State Persistence (LittleFS)
 
-- **`FS.h` / `FS.ino`**  
-  - Encapsulates **LittleFS‑based persistent storage** for:
-    - DCO amp‑comp tables (`voiceTables` file).
-    - PW centre and limit values (`PWCenter`, `PWHighLimit`, `PWLowLimit` files).
-    - Manual calibration offsets (`ManualOffset`).
-  - `init_FS()`:
-    - Mounts LittleFS and opens/creates calibration files.
-    - Reads amp‑comp bank data from flash (`freq_x100` format) and reconstructs either:
-      - Shared `ampCompArray` (`int32_t`); float engine also fills `ampCompFrequencyHz` (Q8 seeded at precompute for FIXED).
-    - Loads PW calibration values into `PW_CENTER` and `PW_LOW_LIMIT`.
-  - `update_FS_voice()`:
-    - Writes a single oscillator’s calibration slice (`calibrationData[]`) back to `voiceTables` in binary form.
-  - `update_FS_PWCenter()` / `update_FS_PW_High_Limit()` / `update_FS_PW_Low_Limit()`:
-    - Update PW centre and limit values for a given voice in their corresponding files.
-  - `write_fs_bank()` — truncate/create a file and write a full bank (shared with bulk restore).
+- **`FS.h` / `FS.ino` — one-line shims over the shared library.** The code is
+  `_shared/FS.h` (sizes, buffers, prototypes) and `_shared/FS_impl.h`
+  (definitions), both consumed by DCO3 and DCO4. Format, sizing rules and the
+  invariants that keep existing calibration readable:
+  [`../_shared/docs/CALIBRATION_STORAGE.md`](../_shared/docs/CALIBRATION_STORAGE.md).
+  - Seven flat little-endian LittleFS banks, no header or version byte, index =
+    oscillator (or PW channel). On this board: `voiceTables` 528 B (3 osc × 22
+    `[freq_x100:u32][range_pwm:u32]` pairs), `PWCenter` / `PWHighLimit` /
+    `PWLowLimit` 6 B each (`NUM_PW_CHANNELS` = 3), `ManualOffset` 3 B (`i8`/osc),
+    `AmpComp440` 6 B (`u16`/osc), `AmpCompDutyOffset` 6 B (`i16`/osc, 0.01 %).
+  - `init_FS()` — the only reader. Mounts LittleFS, creates any missing bank,
+    reads the leading `FS*BankSize` bytes (never the file's real on-disk length)
+    and unpacks into `ampCompArray` + `ampCompFrequencyHz` (float) or
+    `ampCompFrequencyArray` (fixed, Q8 at precompute), `PW_CENTER` /
+    `PW_LOW_LIMIT` / `PW_HIGH_LIMIT`, `manualCalibrationOffset`, `ampComp440`,
+    `ampCompDutyOffset`. Idempotent; every write path ends by calling it.
+  - `update_FS_voice()` — seeks and rewrites one oscillator's 176 B slice from
+    `calibrationData[]`.
+  - `update_FS_PWCenter()` / `_PW_High_Limit()` / `_PW_Low_Limit()` — one `u16`
+    at a **PW channel** index (`cal_pw_channel(osc)`), bounds-checked. Opened
+    `"r+"`, so the bank must already exist — `init_FS()` guarantees that.
+  - `update_FS_ManualCalibrationOffset()` / `_AmpComp440()` /
+    `_AmpCompDutyOffset()` — the per-oscillator manual trims, from
+    `apply_param_manual_calibration_store()`.
+  - `write_fs_bank()` — truncate/create a file and write a full bank (shared with
+    bulk restore; also how the fake seed repairs a wrong-sized leftover file).
+  - `seed_fake_calibration_tables(force)` — plausible amp-comp curve + PW
+    defaults (`kPwCenterDefault` in `globals.h`) + `AmpComp440` = 1400 so a
+    virgin board boots and plays. Boot calls it with `false` (no-op once
+    `voiceTables` exists); debug command 30 forces it.
+  - **Careful:** bank sizes are compile-time constants that `preset_bulk_commit()`,
+    `dump_fs_file()` and the host `DCO-CONTROL-PANEL` model all derive
+    independently. Changing one silently breaks stored calibration. The DCO4-only
+    PW bank repair (`ensure_pw_fs_banks()`) is compiled out here by
+    `#if PROJECT_INSTRUMENT == 4` and must stay that way.
 
 - **`preset_store.h` / `preset_store.ino`** — MCU **256-slot patch store** + host dump/restore. Deep doc: [`PRESET_STORE.md`](PRESET_STORE.md).
   - Fixed **598-byte** records packed 4-per-file in `pb00`…`pb63` (512 KB FS); `pstLast` for boot/MIDI recall.

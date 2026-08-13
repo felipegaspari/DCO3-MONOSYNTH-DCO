@@ -357,11 +357,15 @@ static volatile uint8_t pio_defer_subosc_master_mask = 0;
 static constexpr uint8_t PIO_DEFER_SUBOSC_LOGIC = 1u << 5;
 static volatile uint8_t pio_defer_subosc_logic_op = 0;
 #endif
-
-void setSyncMode();  // voices.ino — must run on core 1 only
+// Bit 7: bits 4-6 belong to the per-sub requests above, wired or not.
+static constexpr uint8_t PIO_DEFER_CAL_RESTORE = 1u << 7;
 
 void pio_defer_request_sync_mode() {
   __atomic_fetch_or(&pio_defer_pending, PIO_DEFER_SYNC, __ATOMIC_SEQ_CST);
+}
+
+void pio_defer_request_cal_restore() {
+  __atomic_fetch_or(&pio_defer_pending, PIO_DEFER_CAL_RESTORE, __ATOMIC_SEQ_CST);
 }
 
 void pio_defer_request_reset_pulse_all() {
@@ -438,6 +442,11 @@ void pio_defer_service() {
     return;
   }
 
+  if (pending & PIO_DEFER_CAL_RESTORE) {
+    // Manual cal stops every oscillator SM but the soloed one and zeroes the PW
+    // channels; nothing in the play path ever starts them again.
+    restore_voice_engine_after_calibration();
+  }
   if (pending & PIO_DEFER_SYNC) {
     setSyncMode();
   }

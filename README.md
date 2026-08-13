@@ -83,6 +83,7 @@ See `docs/` — especially:
 - [`docs/FILTER_ROUTING.md`](docs/FILTER_ROUTING.md) — SSI2144 → dist → AS3320 multimode concept
 - [`docs/PIO_OSCILLATORS.md`](docs/PIO_OSCILLATORS.md) — PIO programs, state machine topology, period model, sync modes, phase align, sub-osc, and the invariants behind them
 - [`docs/PRESET_STORE.md`](docs/PRESET_STORE.md) — MCU 256-slot LittleFS presets (4/file chunks), cal dump/restore, `'B'`/`'C'` bulk, text dump protocol
+- [`_shared/docs/CALIBRATION_STORAGE.md`](_shared/docs/CALIBRATION_STORAGE.md) — the seven calibration banks on flash: byte format, per-board sizing, and what must never change (`FS.h` / `FS.ino` are shims over the shared library)
 - [`docs/README_serial_and_params.md`](docs/README_serial_and_params.md) — slim inner serial / ParamId how-to (incl. preset cmds)
 - [`tools/dco_control/`](tools/dco_control/README.md) — Linux bench controller: parameters, preset browser, MCU sync, cal backup over USB
 - [`docs/MIDI_CC_MAP.md`](docs/MIDI_CC_MAP.md) — MIDI CC implementation chart: the same control surface over 7-bit CC, for a panel app or a DAW (generated, along with the Open Stage Control session in `tools/panels/`)

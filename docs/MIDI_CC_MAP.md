@@ -122,8 +122,6 @@ Menu-style parameters use a 0..127 range so the scaling is an identity and a men
 | 109 | Mod slot 7 source | Mod matrix | `PARAM_MOD_SLOT7_SOURCE` | 0 | 127 | linear |
 | 110 | Mod slot 7 dest | Mod matrix | `PARAM_MOD_SLOT7_DEST` | 0 | 127 | linear |
 | 111 | Mod slot 7 depth | Mod matrix | `PARAM_MOD_SLOT7_DEPTH` | -4095 | 4095 | linear |
-| 79 | Manual cal stage (osc) | Calibration | `PARAM_MANUAL_CALIBRATION_STAGE` | 0 | 2 | linear |
-| 80 | Manual cal offset | Calibration | `PARAM_MANUAL_CALIBRATION_OFFSET` | -20 | 20 | linear |
 
 ## Menu values
 
@@ -204,8 +202,10 @@ Every non-reserved 7-bit controller is already assigned (0 free). Sub-oscillator
 - **Character** (parameter 221)
 - **Run calibration** (parameter 150)
 - **Manual calibration mode** (parameter 151)
-- **Manual cal step (440 Hz)** (parameter 158)
+- **Manual cal stage** (parameter 152)
+- **Manual cal offset** (parameter 153)
 - **Amp comp @ 440 Hz** (parameter 159)
+- **PW center (cal)** (parameter 162)
 - **Duty trim (0.01%)** (parameter 161)
 - **Store manual cal offsets** (parameter 156)
 

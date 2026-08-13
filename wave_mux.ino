@@ -59,9 +59,14 @@ void update_waveSelector() {
 
 void waveSelector_manual_calibration(byte stage) {
   waveMuxBits = 0xFFFF;
-  if (stage > 2) stage = 2;
-  // Solo OSC{stage} Saw
-  waveMuxWritePin(WAVE_MUX_BIT[stage][0], 0);
+  uint8_t osc = cal_stage_to_osc(stage);
+  if (osc > 2) osc = 2;
+  // Saw only on sub 0; pulse and 440 Hz substages play the square (wave 1).
+  // Never TRI.
+  uint8_t wave = 1;
+  if (cal_stage_is_saw(stage)) wave = 0;
+  else if (cal_stage_is_tri(stage)) wave = 2;
+  waveMuxWritePin(WAVE_MUX_BIT[osc][wave], 0);
   waveMuxShiftOut();
 }
 
