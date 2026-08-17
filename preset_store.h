@@ -3,7 +3,9 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include "params_def.h"
+
+#include "_build_libs/DCO-PROTOCOL/params_def.h"
+#include "_build_libs/DCO-PROTOCOL/serial_input_protocol.h"
 
 // -----------------------------------------------------------------------------
 // MCU-side preset store (LittleFS) + host dump / bulk-restore protocol.
@@ -29,10 +31,10 @@
 //   [dump] end target=<t> crc=<crc32 hex> ; [pdir] / [preset] / [bulk] lines.
 // -----------------------------------------------------------------------------
 
-static constexpr uint16_t PRESET_NUM_SLOTS         = 256;
+// static constexpr uint16_t PRESET_NUM_SLOTS         = 256;  // From dco-protocol
 static constexpr uint8_t  PRESET_RECORDS_PER_FILE  = 4;
 static constexpr uint8_t  PRESET_CHUNK_COUNT       = 64;   // 256 / 4
-static constexpr uint8_t  PRESET_NAME_LEN          = 16;
+// static constexpr uint8_t  PRESET_NAME_LEN          = 16;   // From DCO_PROTOCOL
 static constexpr uint8_t  PRESET_MAGIC             = 0xA5;
 static constexpr uint8_t  PRESET_VERSION           = 1;
 
@@ -122,8 +124,6 @@ static inline bool preset_param_is_persistable(uint8_t id) {
   if (id >= (uint8_t)PARAM_LFO1_TO_OSC1 && id <= (uint8_t)PARAM_ADSR3_PITCH_MODE) {
     return true;
   }
-  // Both subs' divide / master / phase / width, plus the logic combiner (90..99). 98 is
-  // reserved and simply never arrives; 100 is reserved too and is left out of the range.
   if (id >= (uint8_t)PARAM_SUB1_DIVIDE && id <= (uint8_t)PARAM_SUB_LOGIC_OP) {
     return true;
   }
@@ -131,6 +131,12 @@ static inline bool preset_param_is_persistable(uint8_t id) {
     case PARAM_OSC1_SAW_ENABLE:
     case PARAM_OSC1_PULSE_ENABLE:
     case PARAM_OSC1_TRI_ENABLE:
+    case PARAM_OSC2_SAW_ENABLE:
+    case PARAM_OSC2_PULSE_ENABLE:
+    case PARAM_OSC2_TRI_ENABLE:
+    case PARAM_OSC3_SAW_ENABLE:
+    case PARAM_OSC3_PULSE_ENABLE:
+    case PARAM_OSC3_TRI_ENABLE:
     case PARAM_RESONANCE_COMPENSATION:
     case PARAM_VCA_ADSR_RESTART:
     case PARAM_VCF_ADSR_RESTART:
@@ -139,17 +145,24 @@ static inline bool preset_param_is_persistable(uint8_t id) {
     case PARAM_LFO2_WAVEFORM:
     case PARAM_OSC1_INTERVAL:
     case PARAM_OSC2_INTERVAL:
+    case PARAM_OSC3_INTERVAL:
     case PARAM_OSC2_DETUNE_VAL:
+    case PARAM_OSC3_DETUNE_VAL:
     case PARAM_LFO2_TO_OSC2:
+    case PARAM_LFO2_TO_OSC3:
+    case PARAM_LFO2_TO_OSC2_COARSE:
+    case PARAM_LFO2_TO_OSC3_COARSE:
+    case PARAM_CHARACTER:
     case PARAM_OSC_SYNC_MODE:
     case PARAM_PORTAMENTO_TIME:
+    case PARAM_PORTAMENTO_MODE:
     case PARAM_VCF_KEYTRACK:
     case PARAM_VELOCITY_TO_VCF:
     case PARAM_VELOCITY_TO_VCA:
     case PARAM_OSC1_LEVEL:
     case PARAM_OSC2_LEVEL:
-    case PARAM_SUB_LEVEL:
     case PARAM_OSC3_LEVEL:
+    case PARAM_SUB_LEVEL:
     case PARAM_VOICE_MODE:
     case PARAM_VOICE_ALLOC_MODE:
     case PARAM_UNISON_DETUNE:
@@ -157,10 +170,6 @@ static inline bool preset_param_is_persistable(uint8_t id) {
     case PARAM_ANALOG_DRIFT_SPEED:
     case PARAM_ANALOG_DRIFT_SPREAD:
     case PARAM_SYNC_MODE:
-    case PARAM_PORTAMENTO_MODE:
-    case PARAM_OSC3_INTERVAL:
-    case PARAM_OSC3_DETUNE_VAL:
-    case PARAM_LFO2_TO_OSC3:
     case PARAM_SOFT_SYNC:
     case PARAM_SUBOSC_DIVIDE:
     case PARAM_LFO1_TO_DCO:
@@ -178,12 +187,6 @@ static inline bool preset_param_is_persistable(uint8_t id) {
     case PARAM_DIST_DRIVE:
     case PARAM_DIST_MIX:
     case PARAM_FILTER_MODE:
-    case PARAM_OSC2_SAW_ENABLE:
-    case PARAM_OSC2_PULSE_ENABLE:
-    case PARAM_OSC2_TRI_ENABLE:
-    case PARAM_OSC3_SAW_ENABLE:
-    case PARAM_OSC3_PULSE_ENABLE:
-    case PARAM_OSC3_TRI_ENABLE:
     case PARAM_ADSR3_ENABLED:
     case PARAM_PW_VALUE:
       return true;
@@ -198,7 +201,18 @@ static inline void preset_shadow_capture(uint16_t id, int16_t value) {
   if (!preset_param_is_persistable((uint8_t)id)) return;
   presetParamShadow[id] = value;
   presetParamSetBitmap[id >> 3] |= (uint8_t)(1u << (id & 7u));
+  if (id == (uint16_t)PARAM_OSC1_PULSE_ENABLE) {
+    pulseWaveOn[0] = (value != 0);
+  }
+  if (id == (uint16_t)PARAM_OSC2_PULSE_ENABLE) {
+    pulseWaveOn[1] = (value != 0);
+  }
+  if (id == (uint16_t)PARAM_OSC3_PULSE_ENABLE) {
+    pulseWaveOn[2] = (value != 0);
+  }
 }
+
+
 
 // --- preset_store.ino --------------------------------------------------------
 void preset_store_save(uint8_t slot);

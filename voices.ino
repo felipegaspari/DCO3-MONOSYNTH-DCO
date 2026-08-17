@@ -81,6 +81,60 @@ void init_voices() {
   voice_task_main();
 }
 
+// Map raw PW counter into calibrated center/limits for one oscillator.
+inline uint16_t get_PW_level_interpolated(uint16_t PWval, uint8_t oscN, bool invertPolarity = PW_POLARITY_INVERTED) {
+  const uint8_t ch = cal_pw_channel(oscN);
+  if (ch >= NUM_PW_CHANNELS || PW_PINS[ch] == PW_PIN_UNASSIGNED) return 0;
+
+  constexpr uint16_t pwMax = DIV_COUNTER_PW - 1;
+
+  // 1. Hard input clamp
+  if (PWval > pwMax) PWval = pwMax;
+
+  // 2. Polarity flip (smoothly inverts the full knob travel)
+  if (invertPolarity) {
+    PWval = pwMax - PWval;
+  }
+
+  const int32_t center = (int32_t)PW_CENTER[ch];
+
+  // =========================================================================
+  // CASE 1: DCO3 HALF-LOW (0 .. pwMax -> Center .. PW_LOW_LIMIT)
+  // =========================================================================
+  if (pwSweepMode == PW_SWEEP_HALF_LOW) {
+    const int32_t span = (int32_t)PW_LOW_LIMIT[ch] - center;
+    int32_t out = center + (span * (int32_t)PWval) / (int32_t)pwMax;
+    return (uint16_t)(out < 0 ? 0 : (out > DIV_COUNTER_PW ? DIV_COUNTER_PW : out));
+  }
+
+  // =========================================================================
+  // CASE 2: DCO3 HALF-HIGH (0 .. pwMax -> Center .. PW_HIGH_LIMIT)
+  // =========================================================================
+  if (pwSweepMode == PW_SWEEP_HALF_HIGH) {
+    const int32_t span = (int32_t)PW_HIGH_LIMIT[ch] - center;
+    int32_t out = center + (span * (int32_t)PWval) / (int32_t)pwMax;
+    return (uint16_t)(out < 0 ? 0 : (out > DIV_COUNTER_PW ? DIV_COUNTER_PW : out));
+  }
+
+  // =========================================================================
+  // CASE 3: DCO4 FULL SWEEP (2% -> 50% -> 98% with Center at 12 o'clock)
+  // =========================================================================
+  constexpr uint16_t pwMid = DIV_COUNTER_PW / 2;
+  int32_t out;
+
+  if (PWval >= pwMid) {
+    // Upper half (Mid -> Max): Center -> PW_HIGH_LIMIT
+    const int32_t span = (int32_t)PW_HIGH_LIMIT[ch] - center;
+    out = center + (span * (int32_t)(PWval - pwMid)) / (int32_t)(pwMax - pwMid);
+  } else {
+    // Lower half (Min -> Mid): PW_LOW_LIMIT -> Center
+    const int32_t span = center - (int32_t)PW_LOW_LIMIT[ch];
+    out = (int32_t)PW_LOW_LIMIT[ch] + (span * (int32_t)PWval) / (int32_t)pwMid;
+  }
+
+  return (uint16_t)(out < 0 ? 0 : (out > DIV_COUNTER_PW ? DIV_COUNTER_PW : out));
+}
+
 // Fast helper: convert a Q16 note (semitones) to Q24 frequency using linear
 // interpolation on the sNotePitches_q24 table. Used in slew-rate mode.
 static inline int64_t noteQ16_to_freqQ24(int32_t note_q16) {
@@ -979,36 +1033,41 @@ void __not_in_flash_func(voice_task_fixed_point)() {
         }
         BENCH_END(vt_range_pwm);
 
-        // Shared PW PWM when any oscillator has analog Pulse enabled (DG411).
-        const bool pulseOn = waveEnable[0][1] || waveEnable[1][1] || waveEnable[2][1];
-        if (pulseOn) {
+        for (int i = 0; i < NUM_OSCILLATORS; i++) {
+          if (pulseWaveOn[i]) { 
+          BENCH_FBEGIN(vt_pwm_calc);
+
           const int16_t local_LFO2Level = LFO2Level;
           const int16_t local_LFO2toPW = LFO2toPW;
-          BENCH_FBEGIN(vt_pwm_calc);
-          // Optimized: This version avoids storing large intermediate products.
-          // The multiplication and shift are combined into one expression per modulator,
-          // allowing the compiler to make better use of registers.
-          // int32: |q15|*|scale| and |LFO|*|LFO2toPW| fit before >> 15 (no int64 on M0+).
-          int32_t adsr1_delta =
-            ((int32_t)ADSR1Level_q15[i] * ADSR1toPWM_scale) >> 15;
-          int32_t lfo2_delta =
-            ((int32_t)local_LFO2Level * (int32_t)local_LFO2toPW) >> 15;
-          int32_t pw_calc = (int32_t)DIV_COUNTER_PW - 1 - lfo2_delta - PW[0] + adsr1_delta
-                            + character_pw_delta();
+          const int16_t local_ADSR1toPWM = ADSR1toPWM;
 
-          if (pw_calc < 0) pw_calc = 0;
-          if (pw_calc > (int32_t)DIV_COUNTER_PW - 1) pw_calc = (int32_t)DIV_COUNTER_PW - 1;
-          PW_PWM[i] = (uint16_t)pw_calc;
-          BENCH_FEND(vt_pwm_calc);
-
-          BENCH_BEGIN(vt_pw_update);
-          pwm_set_chan_level(PW_PWM_SLICES[i], pwm_gpio_to_channel(PW_PINS[i]), get_PW_level_interpolated(PW_PWM[i], i));
-          BENCH_END(vt_pw_update);
-
-        } else {
-          BENCH_BEGIN(vt_pw_update);
-          pwm_set_chan_level(PW_PWM_SLICES[i], pwm_gpio_to_channel(PW_PINS[i]), 0);
-          BENCH_END(vt_pw_update);
+          const uint8_t pwCh = cal_pw_channel(i);
+                       
+              // Fast Integer Q15 Math (Zero soft-float overhead on RP2040)
+              const int32_t adsr1_delta = ((int32_t)ADSR1Level_q15[i] * (int32_t)local_ADSR1toPWM) >> 15;
+              const int32_t lfo2_delta  = ((int32_t)local_LFO2Level * (int32_t)local_LFO2toPW) >> 15;
+              
+              // Modulation sum
+              int32_t pw_calc = (int32_t)(DIV_COUNTER_PW - 1)
+                              - (int32_t)PW[pwCh]
+                              - lfo2_delta
+                              + adsr1_delta
+                              + (int32_t)character_pw_delta();
+  
+              // Clamping
+              if (pw_calc < 0) pw_calc = 0;
+              if (pw_calc > (int32_t)(DIV_COUNTER_PW - 1)) pw_calc = (int32_t)(DIV_COUNTER_PW - 1);
+  
+              PW_PWM[i] = (uint16_t)pw_calc;
+  
+              // Apply calibrated hardware PWM level
+              uint16_t hwLevel = get_PW_level_interpolated(PW_PWM[i], i);
+              pwm_set_chan_level(PW_PWM_SLICES[pwCh], pwm_gpio_to_channel(PW_PINS[pwCh]), hwLevel);
+              BENCH_FEND(vt_pwm_calc);
+          } else {
+            const uint8_t pwCh = cal_pw_channel(i);
+            pwm_set_chan_level(PW_PWM_SLICES[pwCh], pwm_gpio_to_channel(PW_PINS[pwCh]), 0);
+          }
         }
       }
   }
@@ -1616,37 +1675,37 @@ void __not_in_flash_func(voice_task_float)() {
         }
         BENCH_END(vt_range_pwm);
 
-        const bool pulseOn = waveEnable[0][1] || waveEnable[1][1] || waveEnable[2][1];
-        if (pulseOn) {
-          const int16_t local_LFO2Level = LFO2Level;
-          const int16_t local_LFO2toPW = LFO2toPW;
+        for (int i = 0; i < NUM_OSCILLATORS; i++) {
+          if (pulseWaveOn[i]) { 
           BENCH_FBEGIN(vt_pwm_calc);
-          float adsr1_delta =
-            ((float)ADSR1Level_q15[i] * (float)ADSR1toPWM_scale) * (1.0f / 32768.0f);
-          float lfo2_delta =
-            ((float)local_LFO2Level * (float)local_LFO2toPW) * (1.0f / 32767.0f);
-          float pw_calc =
-              (float)DIV_COUNTER_PW - 1.0f
-            - (float)PW[0]
-            - lfo2_delta
-            + adsr1_delta
-            + (float)character_pw_delta();
-  
-          if (pw_calc < 0.0f) pw_calc = 0.0f;
-          if (pw_calc > (float)(DIV_COUNTER_PW - 1)) pw_calc = (float)(DIV_COUNTER_PW - 1);
-  
-          PW_PWM[i] = (uint16_t)pw_calc;
-          BENCH_FEND(vt_pwm_calc);
 
-          BENCH_BEGIN(vt_pw_update);
-          pwm_set_chan_level(PW_PWM_SLICES[i],
-                             pwm_gpio_to_channel(PW_PINS[i]),
-                             get_PW_level_interpolated(PW_PWM[i], i));
-          BENCH_END(vt_pw_update);
-        } else {
-          BENCH_BEGIN(vt_pw_update);
-          pwm_set_chan_level(PW_PWM_SLICES[i], pwm_gpio_to_channel(PW_PINS[i]), 0);
-          BENCH_END(vt_pw_update);
+          const uint8_t pwCh = cal_pw_channel(i);
+                       
+              // Fast Integer Q15 Math (Zero soft-float overhead on RP2040)
+              const int32_t adsr1_delta = ((int32_t)ADSR1Level_q15[i] * (int32_t)ADSR1toPWM) >> 15;
+              const int32_t lfo2_delta  = ((int32_t)LFO2Level * (int32_t)LFO2toPW) >> 15;
+              
+              // Modulation sum
+              int32_t pw_calc = (int32_t)(DIV_COUNTER_PW - 1)
+                              - (int32_t)PW[pwCh]
+                              - lfo2_delta
+                              + adsr1_delta
+                              + (int32_t)character_pw_delta();
+  
+              // Clamping
+              if (pw_calc < 0) pw_calc = 0;
+              if (pw_calc > (int32_t)(DIV_COUNTER_PW - 1)) pw_calc = (int32_t)(DIV_COUNTER_PW - 1);
+  
+              PW_PWM[i] = (uint16_t)pw_calc;
+  
+              // Apply calibrated hardware PWM level
+              uint16_t hwLevel = get_PW_level_interpolated(PW_PWM[i], i);
+              pwm_set_chan_level(PW_PWM_SLICES[pwCh], pwm_gpio_to_channel(PW_PINS[pwCh]), hwLevel);
+              BENCH_FEND(vt_pwm_calc);
+          } else {
+            const uint8_t pwCh = cal_pw_channel(i);
+            pwm_set_chan_level(PW_PWM_SLICES[pwCh], pwm_gpio_to_channel(PW_PINS[pwCh]), 0);
+          }
         }
       }
     }
@@ -1989,41 +2048,6 @@ uint16_t __not_in_flash_func(get_chan_level_lut)(float freqHz, uint8_t voiceN) {
   return ampCompLut[voiceN][hz];
 }
 #endif  // USE_FLOAT_AMP_COMP
-
-// Map raw PW counter into calibrated center/limits for one oscillator. Used on the 99 µs PW path.
-inline uint16_t get_PW_level_interpolated(uint16_t PWval, uint8_t oscN) {
-
-  uint16_t chanLevel;
-
-  // Horizontal PW axis: 0 .. DIV_COUNTER_PW-1 (pot/LFO/ADSR domain)
-  // Vertical axis (output): mapped to calibrated low/center/high PWM limits.
-
-  if (PWval >= (DIV_COUNTER_PW - 1)) {
-    // Above max PW, clamp to calibrated high limit.
-    return PW_HIGH_LIMIT[oscN];
-  } else if (PWval <= 0) {
-    // Below min PW, clamp to calibrated low limit.
-    return PW_LOW_LIMIT[oscN];
-  } else {
-    uint16_t pwLowBreak  = PW_LOOKUP[0];  // usually 0
-    uint16_t pwMidBreak  = PW_LOOKUP[1];  // mid-point
-    uint16_t pwHighBreak = PW_LOOKUP[2];  // usually DIV_COUNTER_PW-1
-
-    if (PWval >= pwMidBreak) {
-      // Upper half: interpolate from center to high limit.
-      chanLevel = map(PWval,
-                      pwMidBreak, pwHighBreak,
-                      PW_CENTER[oscN], PW_HIGH_LIMIT[oscN]);
-    } else {
-      // Lower half: interpolate from low limit to center.
-      chanLevel = map(PWval,
-                      pwLowBreak, pwMidBreak,
-                      PW_LOW_LIMIT[oscN], PW_CENTER[oscN]);
-    }
-
-    return chanLevel;
-  }
-}
 
 // Drive one oscillator for calibration measurement (manual cal and nested auto-cal probes).
 void voice_task_autotune(uint8_t taskAutotuneVoiceMode, uint16_t calibrationValue) {

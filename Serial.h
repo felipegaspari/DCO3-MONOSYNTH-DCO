@@ -1,18 +1,9 @@
 #ifndef __SERIAL_H__
 #define __SERIAL_H__
 
-// DCO accepts the 36-byte 'B' bulk-restore chunk (preset_store.h), so the inner
-// payload cap must be raised before serial_frame.h locks its default of 8.
-#ifndef SERIAL_INNER_MAX_PAYLOAD
-#define SERIAL_INNER_MAX_PAYLOAD 36
-#endif
-
-#include "serial_param_protocol.h"
-#include "serial_protocol.h"
-#include "serial_input_protocol.h"
-#include "serial_frame.h"
-#include "serial_parser.h"
 #include "serial2_dma.h"
+
+
 
 // Serial1 = DIN MIDI @ 31250; Serial2 = Input panel protocol + slim 'x'/'p' TX @ 2.5M.
 // Screen has no DCO port: Input relays gap 154 to it on its own Screen port.

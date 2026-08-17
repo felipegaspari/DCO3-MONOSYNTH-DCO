@@ -164,7 +164,7 @@ static void preset_record_apply(const uint8_t* buf) {
     if (!(buf[PRESET_OFF_BITMAP + (id >> 3)] & (1u << (id & 7u)))) continue;
     if (!preset_param_is_persistable((uint8_t)id)) continue;
     const int16_t value = (int16_t)decode_u16_le(buf + PRESET_OFF_PARAMS + id * 2);
-    update_parameters(id, value);
+    update_parameters((uint8_t)id, value);
     serial_echo_persistable_param16((uint8_t)id, value);
   }
 
@@ -185,6 +185,7 @@ static void preset_record_apply(const uint8_t* buf) {
   RESONANCE        = decode_u16_le(b + 26);
   ADSR2toVCF       = (int16_t)decode_u16_le(b + 28);
   LFO2toVCF        = decode_u16_le(b + 30);
+
   mark_adsr_params_dirty(ADSR_DIRTY_VCA_ALL | ADSR_DIRTY_VCF_ALL | ADSR_DIRTY_DCO_ALL);
   cv_bake_adsr2_to_vcf_scale();
   cv_bake_lfo2_to_vcf_scale();

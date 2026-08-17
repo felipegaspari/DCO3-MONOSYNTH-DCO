@@ -235,10 +235,12 @@ static constexpr uint8_t SUBOSC_COUNT = 2;
 // Spare GP2: digital white bitstream when ENABLE_NOISE_OUT (see DCO.ino).
 static constexpr uint8_t NOISE_OUT_PIN = 2;
 
+bool pulseWaveOn[NUM_OSCILLATORS] = {0, 0, 0};
+
 // Pulse-width PWM: one pin per oscillator (new board; DCO4 had one PW per voice).
 // 0xFF = not wired yet — init_pwm / reset_pw skip those entries. Replace [1]/[2] when HW is known.
 static constexpr uint8_t PW_PIN_UNASSIGNED = 0xFF;
-static constexpr uint8_t PW_PINS[NUM_OSCILLATORS] = { 3, PW_PIN_UNASSIGNED, PW_PIN_UNASSIGNED };
+static constexpr uint8_t PW_PINS[NUM_OSCILLATORS] = { 4, PW_PIN_UNASSIGNED, PW_PIN_UNASSIGNED };
 
 // Sub-oscillator square output. GP8 was freed when the SerialPIO screen UART was
 // removed; needs a mixer input on the carrier before it does anything audible.

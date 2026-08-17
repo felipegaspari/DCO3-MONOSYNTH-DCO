@@ -5,7 +5,7 @@
 
 // Sparse mod matrix (8 slots). See docs/MOD_MATRIX.md.
 
-static constexpr uint8_t MOD_SLOT_COUNT = 8;
+// static constexpr uint8_t MOD_SLOT_COUNT = 8; // From DCO-PROTOCOL
 static_assert(MOD_SLOT_COUNT <= 8, "live/pitch masks are uint8_t");
 static constexpr uint8_t MOD_SRC_EMPTY = 0xFF;
 static constexpr uint8_t MOD_DEST_EMPTY = 0xFF;

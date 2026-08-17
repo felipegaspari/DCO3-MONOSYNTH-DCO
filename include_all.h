@@ -16,8 +16,8 @@
 //#include <SingleFileDrive.h>
 // #include <EEPROM.h>
 
-#include "params_def.h"
-#include "param_router.h"
+#include "_build_libs/DCO-PROTOCOL/params_def.h"
+#include "_build_libs/DCO-PROTOCOL/param_router.h"
 
 #include "globals.h"
 #include "cv_state.h"
@@ -27,7 +27,7 @@
 #include "FS.h"
 #include "preset_store.h"
 
-#include "noteList.h"
+#include "_shared/noteList.h"
 #include "amp_comp.h"
 
 #include "Serial.h"
